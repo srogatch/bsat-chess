@@ -3,3 +3,4 @@
 /build/
 __pycache__/
 *.pyc
+/datasets/club_games_data.csv

@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
 
 typedef enum {
   NoFig = 0,
@@ -677,4 +678,68 @@ MoveCat CategorizeMove(const Chessboard *from, const Chessboard *to) {
   return NormalMove;
 }
 
-#include <stdio.h>
+static char PromotionToChar(Figure fig) {
+  switch (FigPiece(fig)) {
+    case PieceQueen:
+      return 'Q';
+    case PieceRook:
+      return 'R';
+    case PieceBishop:
+      return 'B';
+    case PieceKnight:
+      return 'N';
+    default:
+      break;
+  }
+  return '\0';
+}
+
+static void FormatMove(const MoveDesc *mv, char *buffer, size_t buffer_size) {
+  if (buffer_size == 0)
+    return;
+  if (mv->castle_rook_src_col >= 0 && mv->castle_rook_dst_col >= 0) {
+    const char *castle = (mv->dst_col > mv->src_col) ? "O-O" : "O-O-O";
+    snprintf(buffer, buffer_size, "%s", castle);
+    return;
+  }
+  const char src_file = (char)('a' + mv->src_col);
+  const char src_rank = (char)('8' - mv->src_row);
+  const char dst_file = (char)('a' + mv->dst_col);
+  const char dst_rank = (char)('8' - mv->dst_row);
+  const char promo = PromotionToChar(mv->promotion);
+  if (promo != '\0') {
+    snprintf(buffer, buffer_size, "%c%c%c%c=%c", src_file, src_rank, dst_file, dst_rank, promo);
+  } else {
+    snprintf(buffer, buffer_size, "%c%c%c%c", src_file, src_rank, dst_file, dst_rank);
+  }
+  if (mv->is_en_passant) {
+    const size_t len = strlen(buffer);
+    if (len + 5 < buffer_size) {
+      snprintf(buffer + len, buffer_size - len, " e.p.");
+    }
+  }
+}
+
+int main()
+{
+  #include "Situation.h"
+  MoveDesc moves[MAX_LEGAL_MOVES];
+  int move_count = 0;
+  GenerateLegalMoves(&board, whoseTurn, false, NULL, moves, &move_count, MAX_LEGAL_MOVES);
+
+  const char *turn = "Unknown";
+  if (whoseTurn == ColorWhite)
+    turn = "White";
+  else if (whoseTurn == ColorBlack)
+    turn = "Black";
+
+  printf("Turn: %s\n", turn);
+  printf("Legal moves (%d):\n", move_count);
+  for (int i = 0; i < move_count; ++i) {
+    char buffer[32];
+    FormatMove(&moves[i], buffer, sizeof(buffer));
+    printf("  %2d. %s\n", i + 1, buffer);
+  }
+
+  return 0;
+}
