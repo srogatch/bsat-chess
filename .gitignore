@@ -1,1 +1,5 @@
 /model/*.o
+/.venv/
+/build/
+__pycache__/
+*.pyc

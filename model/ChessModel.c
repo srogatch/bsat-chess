@@ -24,6 +24,12 @@ typedef struct {
   uint8_t cells_[8][4];
 } Chessboard;
 
+typedef struct {
+  bool available;
+  int row;
+  int col;
+} EnPassantInfo;
+
 Figure FigAt(const Chessboard *b, int8_t r, int8_t c) {
   assert(0 <= r && r < 8);
   assert(0 <= c && c < 8);
@@ -159,7 +165,6 @@ static void ApplyMove(const Chessboard *from, Chessboard *to, const MoveDesc *mv
   const Figure mover = FigAt(from, mv->src_row, mv->src_col);
   const Figure placed = (mv->promotion != NoFig) ? mv->promotion : mover;
   SetFig(to, mv->src_row, mv->src_col, NoFig);
-  SetFig(to, mv->dst_row, mv->dst_col, placed);
   if (mv->is_en_passant) {
     const int capture_row = mv->src_row;
     const int capture_col = mv->dst_col;
@@ -171,6 +176,7 @@ static void ApplyMove(const Chessboard *from, Chessboard *to, const MoveDesc *mv
     SetFig(to, rook_row, mv->castle_rook_src_col, NoFig);
     SetFig(to, rook_row, mv->castle_rook_dst_col, rook);
   }
+  SetFig(to, mv->dst_row, mv->dst_col, placed);
 }
 
 static bool AppendMove(const Chessboard *board, int color, MoveDesc *list, int *count, int max_count, const MoveDesc *mv) {
@@ -185,12 +191,13 @@ static bool AppendMove(const Chessboard *board, int color, MoveDesc *list, int *
   return true;
 }
 
-static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count);
+static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, bool allow_en_passant, const EnPassantInfo *ep_info, MoveDesc *list, int *count, int max_count);
 static bool AddKnightMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count);
 static bool AddSlidingMoves(const Chessboard *board, int color, int r, int c, const int (*dirs)[2], int dir_count, MoveDesc *list, int *count, int max_count);
 static bool AddKingMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count);
+static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, MoveDesc *list, int *count, int max_count);
 
-static void GenerateLegalMoves(const Chessboard *board, int color, MoveDesc *list, int *count, int max_count) {
+static void GenerateLegalMoves(const Chessboard *board, int color, bool allow_en_passant, const EnPassantInfo *ep_info, MoveDesc *list, int *count, int max_count) {
   *count = 0;
   for (int r = 0; r < 8; ++r) {
     for (int c = 0; c < 8; ++c) {
@@ -201,7 +208,7 @@ static void GenerateLegalMoves(const Chessboard *board, int color, MoveDesc *lis
       bool ok = true;
       switch (type) {
         case PiecePawn:
-          ok = AddPawnMoves(board, color, r, c, list, count, max_count);
+          ok = AddPawnMoves(board, color, r, c, allow_en_passant, ep_info, list, count, max_count);
           break;
         case PieceKnight:
           ok = AddKnightMoves(board, color, r, c, list, count, max_count);
@@ -246,7 +253,7 @@ static bool AddPromotionVariants(const Chessboard *board, int color, int src_row
   return true;
 }
 
-static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count) {
+static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, bool allow_en_passant, const EnPassantInfo *ep_info, MoveDesc *list, int *count, int max_count) {
   const int forward = (color == ColorWhite) ? -1 : 1;
   const int start_row = (color == ColorWhite) ? 6 : 1;
   const int promotion_row = (color == ColorWhite) ? 0 : 7;
@@ -290,7 +297,7 @@ static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, MoveD
     }
   }
 
-  if (r == en_passant_row) {
+  if (allow_en_passant && r == en_passant_row) {
     for (int dc = -1; dc <= 1; dc += 2) {
       const int adjacent_col = c + dc;
       if (!IsInside(r, adjacent_col))
@@ -300,6 +307,8 @@ static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, MoveD
         continue;
       const int target_row = r + forward;
       const int target_col = adjacent_col;
+      if (ep_info && (!ep_info->available || ep_info->row != target_row || ep_info->col != target_col))
+        continue;
       if (!IsInside(target_row, target_col))
         continue;
       if (FigAt(board, target_row, target_col) != NoFig)
@@ -376,44 +385,7 @@ static bool AddKingMoves(const Chessboard *board, int color, int r, int c, MoveD
   if (KingInCheck(board, color))
     return true;
 
-  const int opponent = 1 - color;
-  if (color == ColorWhite && r == 7 && c == 4) {
-    if (FigAt(board, 7, 5) == NoFig && FigAt(board, 7, 6) == NoFig &&
-        FigAt(board, 7, 7) == WhiteRook &&
-        !IsSquareAttacked(board, 7, 5, opponent) &&
-        !IsSquareAttacked(board, 7, 6, opponent)) {
-      MoveDesc mv = {7, 4, 7, 6, NoFig, false, 7, 5};
-      if (!AppendMove(board, color, list, count, max_count, &mv))
-        return false;
-    }
-    if (FigAt(board, 7, 1) == NoFig && FigAt(board, 7, 2) == NoFig &&
-        FigAt(board, 7, 3) == NoFig && FigAt(board, 7, 0) == WhiteRook &&
-        !IsSquareAttacked(board, 7, 3, opponent) &&
-        !IsSquareAttacked(board, 7, 2, opponent)) {
-      MoveDesc mv = {7, 4, 7, 2, NoFig, false, 0, 3};
-      if (!AppendMove(board, color, list, count, max_count, &mv))
-        return false;
-    }
-  } else if (color == ColorBlack && r == 0 && c == 4) {
-    if (FigAt(board, 0, 5) == NoFig && FigAt(board, 0, 6) == NoFig &&
-        FigAt(board, 0, 7) == BlackRook &&
-        !IsSquareAttacked(board, 0, 5, opponent) &&
-        !IsSquareAttacked(board, 0, 6, opponent)) {
-      MoveDesc mv = {0, 4, 0, 6, NoFig, false, 7, 5};
-      if (!AppendMove(board, color, list, count, max_count, &mv))
-        return false;
-    }
-    if (FigAt(board, 0, 1) == NoFig && FigAt(board, 0, 2) == NoFig &&
-        FigAt(board, 0, 3) == NoFig && FigAt(board, 0, 0) == BlackRook &&
-        !IsSquareAttacked(board, 0, 3, opponent) &&
-        !IsSquareAttacked(board, 0, 2, opponent)) {
-      MoveDesc mv = {0, 4, 0, 2, NoFig, false, 0, 3};
-      if (!AppendMove(board, color, list, count, max_count, &mv))
-        return false;
-    }
-  }
-
-  return true;
+  return AddCastlingMoves(board, color, r, c, list, count, max_count);
 }
 
 static bool IsSquareAttacked(const Chessboard *board, int target_row, int target_col, int attacker_color) {
@@ -500,6 +472,111 @@ static bool IsSquareAttacked(const Chessboard *board, int target_row, int target
   return false;
 }
 
+static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, MoveDesc *list, int *count, int max_count) {
+  const int opponent = 1 - color;
+  const int king_targets[2] = {6, 2};
+  const int rook_targets[2] = {5, 3};
+  const int directions[2] = {1, -1};  // kingside, queenside
+
+  for (int side = 0; side < 2; ++side) {
+    const int dir = directions[side];
+    const int king_target_col = king_targets[side];
+    const int rook_target_col = rook_targets[side];
+
+    if (king_target_col < 0 || rook_target_col < 0)
+      continue;
+
+    if (!IsInside(king_row, king_target_col) || !IsInside(king_row, rook_target_col))
+      continue;
+
+    int rook_col = -1;
+    int c = king_col + dir;
+    while (0 <= c && c < 8) {
+      const Figure piece = FigAt(board, king_row, c);
+      if (piece == NoFig) {
+        c += dir;
+        continue;
+      }
+      if (FigColor(piece) == color && FigPiece(piece) == PieceRook)
+        rook_col = c;
+      break;
+    }
+    if (rook_col < 0)
+      continue;
+
+    bool clear_between = true;
+    for (int cc = king_col + dir; cc != rook_col; cc += dir) {
+      if (FigAt(board, king_row, cc) != NoFig) {
+        clear_between = false;
+        break;
+      }
+    }
+    if (!clear_between)
+      continue;
+
+    bool king_path_clear = true;
+    if (king_target_col != king_col) {
+      int step = (king_target_col > king_col) ? 1 : -1;
+      for (int cc = king_col + step; cc != king_target_col + step; cc += step) {
+        if (cc == rook_col)
+          continue;
+        if (FigAt(board, king_row, cc) != NoFig) {
+          king_path_clear = false;
+          break;
+        }
+      }
+      if (!king_path_clear)
+        continue;
+    }
+
+    bool rook_path_clear = true;
+    if (rook_target_col != rook_col) {
+      int step = (rook_target_col > rook_col) ? 1 : -1;
+      for (int cc = rook_col + step; cc != rook_target_col + step; cc += step) {
+        if (cc == king_col)
+          continue;
+        if (FigAt(board, king_row, cc) != NoFig) {
+          rook_path_clear = false;
+          break;
+        }
+      }
+      if (!rook_path_clear)
+        continue;
+    }
+
+    Chessboard tmp = *board;
+    const Figure king = FigAt(board, king_row, king_col);
+    const Figure rook = FigAt(board, king_row, rook_col);
+    SetFig(&tmp, king_row, king_col, NoFig);
+    SetFig(&tmp, king_row, rook_col, NoFig);
+
+    bool safe_path = true;
+    if (king_target_col != king_col) {
+      const int step = (king_target_col > king_col) ? 1 : -1;
+      for (int cc = king_col + step;; cc += step) {
+        SetFig(&tmp, king_row, cc, king);
+        if (IsSquareAttacked(&tmp, king_row, cc, opponent)) {
+          safe_path = false;
+          break;
+        }
+        SetFig(&tmp, king_row, cc, NoFig);
+        if (cc == king_target_col)
+          break;
+      }
+    } else if (IsSquareAttacked(board, king_row, king_col, opponent)) {
+      safe_path = false;
+    }
+    if (!safe_path)
+      continue;
+
+    MoveDesc mv = {king_row, king_col, king_row, king_target_col, NoFig, false, rook_col, rook_target_col};
+    if (!AppendMove(board, color, list, count, max_count, &mv))
+      return false;
+  }
+
+  return true;
+}
+
 MoveCat CategorizeMove(const Chessboard *from, const Chessboard *to) {
   if (BoardsEqual(from, to))
     return InvalidMove;
@@ -508,7 +585,6 @@ MoveCat CategorizeMove(const Chessboard *from, const Chessboard *to) {
     return InvalidMove;
 
   int move_color = ColorNone;
-  bool has_moving_source = false;
   int diff_count = 0;
 
   for (int r = 0; r < 8; ++r) {
@@ -527,28 +603,42 @@ MoveCat CategorizeMove(const Chessboard *from, const Chessboard *to) {
         else if (move_color != color)
           return InvalidMove;
       }
-      if (ff != NoFig && FigColor(ff) != ColorNone && ft == NoFig) {
-        const int color = FigColor(ff);
-        if (move_color == ColorNone)
-          move_color = color;
-        if (color == move_color)
-          has_moving_source = true;
+    }
+  }
+
+  if (diff_count == 0 || move_color == ColorNone)
+    return InvalidMove;
+
+  bool has_moving_source = false;
+  for (int r = 0; r < 8 && !has_moving_source; ++r) {
+    for (int c = 0; c < 8; ++c) {
+      const Figure ff = FigAt(from, r, c);
+      const Figure ft = FigAt(to, r, c);
+      if (ff == ft)
+        continue;
+      if (ff != NoFig && FigColor(ff) == move_color &&
+          (ft == NoFig || FigColor(ft) != move_color || FigPiece(ff) != FigPiece(ft))) {
+        has_moving_source = true;
+        break;
       }
     }
   }
 
-  if (diff_count == 0 || move_color == ColorNone || !has_moving_source)
+  if (!has_moving_source) {
     return InvalidMove;
+  }
 
   MoveDesc moves[MAX_LEGAL_MOVES];
   int move_count = 0;
-  GenerateLegalMoves(from, move_color, moves, &move_count, MAX_LEGAL_MOVES);
+  GenerateLegalMoves(from, move_color, true, NULL, moves, &move_count, MAX_LEGAL_MOVES);
 
   bool matched = false;
+  MoveDesc matched_move;
   for (int i = 0; i < move_count; ++i) {
     Chessboard candidate;
     ApplyMove(from, &candidate, &moves[i]);
     if (BoardsEqual(&candidate, to)) {
+      matched_move = moves[i];
       matched = true;
       break;
     }
@@ -564,9 +654,19 @@ MoveCat CategorizeMove(const Chessboard *from, const Chessboard *to) {
   if (!FindKing(to, opponent, NULL, NULL))
     return (move_color == ColorWhite) ? WhiteWon : BlackWon;
 
+  EnPassantInfo ep_info = {false, 0, 0};
+  if (matched) {
+    const Figure moved_piece = FigAt(from, matched_move.src_row, matched_move.src_col);
+    if (FigPiece(moved_piece) == PiecePawn && (matched_move.dst_row - matched_move.src_row == 2 || matched_move.dst_row - matched_move.src_row == -2)) {
+      ep_info.available = true;
+      ep_info.row = (matched_move.src_row + matched_move.dst_row) / 2;
+      ep_info.col = matched_move.src_col;
+    }
+  }
+
   MoveDesc reply_moves[MAX_LEGAL_MOVES];
   int reply_count = 0;
-  GenerateLegalMoves(to, opponent, reply_moves, &reply_count, MAX_LEGAL_MOVES);
+  GenerateLegalMoves(to, opponent, ep_info.available, ep_info.available ? &ep_info : NULL, reply_moves, &reply_count, MAX_LEGAL_MOVES);
 
   if (reply_count == 0) {
     if (KingInCheck(to, opponent))
@@ -576,3 +676,5 @@ MoveCat CategorizeMove(const Chessboard *from, const Chessboard *to) {
 
   return NormalMove;
 }
+
+#include <stdio.h>
