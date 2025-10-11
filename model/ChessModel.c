@@ -4,6 +4,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef __CPROVER_assert
+#define __CPROVER_assert(expr, msg) do { (void)(expr); (void)(msg); } while (0)
+#endif
+
 typedef enum {
   NoFig = 0,
   WhitePawn = 1,
@@ -77,6 +81,7 @@ typedef struct {
 } MoveDesc;
 
 #define MAX_LEGAL_MOVES 256
+#define MAX_GAME_SEQ 256
 
 static inline bool IsInside(int r, int c) {
   return (0 <= r && r < 8 && 0 <= c && c < 8);
@@ -547,7 +552,6 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
 
     Chessboard tmp = *board;
     const Figure king = FigAt(board, king_row, king_col);
-    const Figure rook = FigAt(board, king_row, rook_col);
     SetFig(&tmp, king_row, king_col, NoFig);
     SetFig(&tmp, king_row, rook_col, NoFig);
 
@@ -720,26 +724,156 @@ static void FormatMove(const MoveDesc *mv, char *buffer, size_t buffer_size) {
   }
 }
 
+#ifdef __CPROVER__
+extern unsigned char nondet_uchar(void);
+#else
+static unsigned char nondet_uchar(void) {
+  return 0;
+}
+#endif
+
 int main()
 {
   #include "Situation.h"
   MoveDesc moves[MAX_LEGAL_MOVES];
   int move_count = 0;
   GenerateLegalMoves(&board, whoseTurn, false, NULL, moves, &move_count, MAX_LEGAL_MOVES);
-
-  const char *turn = "Unknown";
-  if (whoseTurn == ColorWhite)
-    turn = "White";
-  else if (whoseTurn == ColorBlack)
-    turn = "Black";
-
-  printf("Turn: %s\n", turn);
-  printf("Legal moves (%d):\n", move_count);
-  for (int i = 0; i < move_count; ++i) {
-    char buffer[32];
-    FormatMove(&moves[i], buffer, sizeof(buffer));
-    printf("  %2d. %s\n", i + 1, buffer);
+  if (move_count == 0)
+  {
+    // Game Over
+    return 0;
   }
+  int best_move = -1;
+  int my_win = -1; // set it to a loss, so that even a stalemate or uncertainty is better
+  for (int i=0; i<move_count; ++i)
+  {
+    char moveBuffer[32];
+    FormatMove(&moves[i], moveBuffer, sizeof(moveBuffer));
+    Chessboard nextBoard = board;
+    ApplyMove(&board, &nextBoard, &moves[i]);
+    MoveCat mc = CategorizeMove(&board, &nextBoard);
+    assert(mc != InvalidMove);
+    if (mc != NormalMove)
+    {
+      if (mc == Stalemate)
+      {
+        if (my_win < 0)
+        {
+          my_win = 0;
+          best_move = i;
+          continue;
+        }
+      }
+      else if ((mc == WhiteWon && whoseTurn == ColorWhite) || (mc == BlackWon && whoseTurn == ColorBlack))
+      {
+        my_win = 1;
+        best_move = i;
+#ifdef __CPROVER__
+        __CPROVER_assert(0, "WIN IN ONE MOVE - CHECK moveBuffer");
+#endif
+      }
+      continue;
+    }
+    Chessboard sequenceBoard = nextBoard;
+    int sequenceTurn = 1 - whoseTurn;
+    bool forced_win = true;
+    for (int j=0; j<MAX_GAME_SEQ; j++)
+    {
+      MoveDesc opponentMoves[MAX_LEGAL_MOVES];
+      int opponentCount = 0;
+      GenerateLegalMoves(&sequenceBoard, sequenceTurn, false, NULL, opponentMoves, &opponentCount, MAX_LEGAL_MOVES);
+
+      if (opponentCount == 0)
+      {
+        if (KingInCheck(&sequenceBoard, sequenceTurn) &&
+            ((sequenceTurn == ColorWhite && whoseTurn == ColorBlack) ||
+             (sequenceTurn == ColorBlack && whoseTurn == ColorWhite)))
+        {
+          my_win = 1;
+          best_move = i;
+#ifdef __CPROVER__
+          __CPROVER_assert(0, "FORCED WIN - CHECK moveBuffer");
+#endif
+        }
+        else
+        {
+          forced_win = false;
+        }
+        break;
+      }
+
+      unsigned char choice = nondet_uchar();
+      int opponent_index = (int)(choice % opponentCount);
+      MoveDesc opponent_move = opponentMoves[opponent_index];
+
+      Chessboard afterOpponent;
+      ApplyMove(&sequenceBoard, &afterOpponent, &opponent_move);
+
+      MoveCat opponentOutcome = CategorizeMove(&sequenceBoard, &afterOpponent);
+      if ((opponentOutcome == WhiteWon && whoseTurn == ColorBlack) ||
+          (opponentOutcome == BlackWon && whoseTurn == ColorWhite) ||
+          opponentOutcome == Stalemate)
+      {
+        forced_win = false;
+        break;
+      }
+      if ((opponentOutcome == WhiteWon && whoseTurn == ColorWhite) ||
+          (opponentOutcome == BlackWon && whoseTurn == ColorBlack))
+      {
+        my_win = 1;
+        best_move = i;
+#ifdef __CPROVER__
+        __CPROVER_assert(0, "FORCED WIN - CHECK moveBuffer");
+#endif
+        break;
+      }
+
+      MoveDesc responseMoves[MAX_LEGAL_MOVES];
+      int responseCount = 0;
+      GenerateLegalMoves(&afterOpponent, whoseTurn, false, NULL, responseMoves, &responseCount, MAX_LEGAL_MOVES);
+      if (responseCount == 0)
+      {
+        forced_win = false;
+        break;
+      }
+
+      bool winningReply = false;
+      for (int r = 0; r < responseCount; ++r)
+      {
+        Chessboard afterResponse;
+        ApplyMove(&afterOpponent, &afterResponse, &responseMoves[r]);
+        MoveCat responseOutcome = CategorizeMove(&afterOpponent, &afterResponse);
+        if ((responseOutcome == WhiteWon && whoseTurn == ColorWhite) ||
+            (responseOutcome == BlackWon && whoseTurn == ColorBlack))
+        {
+          winningReply = true;
+#ifdef __CPROVER__
+          __CPROVER_assert(0, "FORCED WIN IN TWO - CHECK moveBuffer");
+#endif
+          break;
+        }
+        if ((responseOutcome == WhiteWon && whoseTurn == ColorBlack) ||
+            (responseOutcome == BlackWon && whoseTurn == ColorWhite))
+        {
+          forced_win = false;
+          break;
+        }
+      }
+
+      if (!winningReply || !forced_win)
+      {
+        forced_win = false;
+        break;
+      }
+
+      my_win = 1;
+      best_move = i;
+      break;
+    }
+  }
+
+  (void)best_move;
+  (void)my_win;
 
   return 0;
 }
