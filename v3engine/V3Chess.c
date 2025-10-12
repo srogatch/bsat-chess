@@ -219,6 +219,7 @@ extern bool nondet_bool();
 // Returns +1 if I win, 0 if the game ends in a draw or stalemate, or -1 if I lose.
 int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *bestMove)
 {
+  bool nondetHadMove = false;
   int8_t bestOutcome = -2; // assume I lose unless found a better move
   // First of all check if we need to hide from a check or retreat
   const bool iamWhite = !cgs->blacksTurn_;
@@ -292,9 +293,10 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
     else
     {
       const bool choose = nondet_bool();
+      *bestMove = MakeMove(myKingRow, myKingCol, nextKingRow, nextKingCol);
+      nondetHadMove = true;
       if (choose)
       {
-        *bestMove = MakeMove(myKingRow, myKingCol, nextKingRow, nextKingCol);
         return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
       }
     }
@@ -356,9 +358,10 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           else
           {
             const bool choose = nondet_bool();
+            *bestMove = MakeMove(myKingRow, myKingCol, 0, 6);
+            nondetHadMove = true;
             if (choose)
             {
-              *bestMove = MakeMove(myKingRow, myKingCol, 0, 6);
               return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
             }
           }
@@ -414,9 +417,10 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           else
           {
             const bool choose = nondet_bool();
+            *bestMove = MakeMove(myKingRow, myKingCol, 0, 2);
+            nondetHadMove = true;
             if (choose)
             {
-              *bestMove = MakeMove(myKingRow, myKingCol, 0, 2);
               return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
             }
           }
@@ -472,9 +476,10 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           else
           {
             const bool choose = nondet_bool();
+            *bestMove = MakeMove(myKingRow, myKingCol, 7, 6);
+            nondetHadMove = true;
             if (choose)
             {
-              *bestMove = MakeMove(myKingRow, myKingCol, 7, 6);
               return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
             }
           }
@@ -529,9 +534,10 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           else
           {
             const bool choose = nondet_bool();
+            *bestMove = MakeMove(myKingRow, myKingCol, 7, 2);
+            nondetHadMove = true;
             if (choose)
             {
-              *bestMove = MakeMove(myKingRow, myKingCol, 7, 2);
               return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
             }
           }
@@ -539,9 +545,34 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
       }
     }
   }
-  if (kingCheck.isCheck_)
-  {
-    // TODO: try to hide behind some piece of mine, or take the offending opponent's piece
-  }
+  // TODO: if my king is at a check, try to hide behind some piece of mine, or take the offending opponent's piece
+  // TODO: try to move my figures, verifying that after that move my king is not at a check
   // TODO: if a rook moves, wipe off the possibility of castling with that rook
+  if (bestOutcome == -2) // No moves detected
+  {
+    if (iamDeterm)
+    {
+      if (kingCheck.isCheck_)
+      {
+        // Deterministic, a check and no moves => mate (I lost)
+        return -1;
+      }
+      else
+      {
+        // Deterministic, no check and no moves => stalemate
+        return 0;
+      }
+    }
+    else
+    {
+      if (!kingCheck.isCheck_ && !nondetHadMove)
+      {
+        // Non-deterministic, but no check and no move options appeared => stalemate
+        return 0;
+      }
+      // Non-deterministic, but haven't selected any move => I surrendered
+      return -1;
+    }
+  }
+  return bestOutcome;
 }
