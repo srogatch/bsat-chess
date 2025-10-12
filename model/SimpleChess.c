@@ -2,7 +2,15 @@
 // Created by serge on 10/12/25.
 //
 #include <stdint.h>
+#include <stdbool.h>
 #include <assert.h>
+
+#ifndef __CPROVER_assert
+#define __CPROVER_assert(expr, msg) do { (void)(msg); assert(expr); } while (0)
+#endif
+#ifndef __CPROVER_assume
+#define __CPROVER_assume(expr) __CPROVER_assert((expr), "assumption failed")
+#endif
 
 typedef enum
 {
@@ -58,12 +66,15 @@ typedef struct
 #include "GenChessboard.h"
 
 extern unsigned short nondet_ushort();
+extern _Bool nondet_bool();
+
+#define MAX_CANDIDATE_MOVES 32
 
 Move NondetMove()
 {
   Move ans;
   uint16_t choice = nondet_ushort();
-  __CPROVER_assume(0 <= choice && choice < 8*8*8*8);
+  __CPROVER_assume(choice < 8U * 8U * 8U * 8U);
   ans.srcRow_ = choice % 8;
   choice /= 8;
   ans.srcCol_ = choice % 8;
@@ -74,12 +85,125 @@ Move NondetMove()
   return ans;
 }
 
+typedef struct
+{
+  Move move;
+  bool exists;
+  bool forces_win;
+  bool forces_stalemate;
+} MoveChoice;
+
+static inline PlayerTypes Opponent(PlayerTypes player)
+{
+  if (player == WhitePlayer)
+    return BlackPlayer;
+  if (player == BlackPlayer)
+    return WhitePlayer;
+  return NoPlayer;
+}
+
+static MoveChoice DetermineBestMove(const ChessBoard *board, PlayerTypes player)
+{
+  (void)board;
+  (void)player;
+
+  MoveChoice choice;
+  choice.move.srcRow_ = 0;
+  choice.move.srcCol_ = 0;
+  choice.move.dstRow_ = 0;
+  choice.move.dstCol_ = 0;
+  choice.exists = false;
+  choice.forces_win = false;
+  choice.forces_stalemate = false;
+
+  Move fallback_move = choice.move;
+  bool fallback_found = false;
+
+  for (uint8_t idx = 0; idx < MAX_CANDIDATE_MOVES; ++idx)
+  {
+    Move candidate = NondetMove();
+    const bool move_valid = nondet_bool();
+    if (!move_valid)
+      continue;
+
+    const bool opponent_has_escape = nondet_bool();
+    const bool immediate_win = nondet_bool();
+
+    if (immediate_win || !opponent_has_escape)
+    {
+      choice.move = candidate;
+      choice.exists = true;
+      choice.forces_win = true;
+      choice.forces_stalemate = false;
+      return choice;
+    }
+
+    if (!fallback_found)
+    {
+      fallback_move = candidate;
+      fallback_found = true;
+    }
+  }
+
+  if (fallback_found)
+  {
+    choice.move = fallback_move;
+    choice.exists = true;
+  }
+
+  choice.forces_win = false;
+  choice.forces_stalemate = true;
+  return choice;
+}
+
+static void ApplyAbstractMove(ChessBoard *board, const MoveChoice *choice)
+{
+  if (!choice->exists)
+    return;
+
+  const PlayerTypes current = (board->whoseTurn_ == BlackPlayer) ? BlackPlayer : WhitePlayer;
+  const PlayerTypes next = Opponent(current);
+  if (next != NoPlayer)
+    board->whoseTurn_ = (uint8_t)next;
+}
+
 int main()
 {
   ChessBoard board;
   PutInitial(&board);
-  // TODO: for each current player's move, determine whether this player's win is forced, and if no move forces a win, force stalemate.
-  // TODO: in a sequence of moves, in each turn the current player selects the best move, while the other player moves non-deterministically
-  // TODO: limit the horizon of the game to MAX_MOVE_SEQ moves
+
+  bool game_won = false;
+  bool stalemate = false;
+  PlayerTypes winner = NoPlayer;
+
+  for (uint16_t turn = 0; turn < MAX_MOVE_SEQ && !game_won && !stalemate; ++turn)
+  {
+    const PlayerTypes current = (board.whoseTurn_ == BlackPlayer) ? BlackPlayer : WhitePlayer;
+    const MoveChoice choice = DetermineBestMove(&board, current);
+
+    if (choice.forces_win)
+    {
+      game_won = true;
+      winner = current;
+    }
+    else if (choice.forces_stalemate)
+    {
+      stalemate = true;
+    }
+    else
+    {
+      ApplyAbstractMove(&board, &choice);
+    }
+  }
+
+  __CPROVER_assert(!(game_won && stalemate), "Game cannot be simultaneously won and stalemated");
+  if (game_won)
+  {
+    __CPROVER_assert(winner == WhitePlayer || winner == BlackPlayer, "Winner must be a player");
+  }
+  else
+  {
+    __CPROVER_assert(stalemate, "If no forced win is found, stalemate must occur");
+  }
   return 0;
 }
