@@ -32,122 +32,257 @@ static inline int same_color(uint8_t a, uint8_t b) {
   return (is_white_piece(a) && is_white_piece(b)) || (is_black_piece(a) && is_black_piece(b));
 }
 
-/* === Attack detection ===
-   We removed the 8x8 king scan (king coords are stored in the state).
-   We also cap/unwind ray walks to 7 steps for CBMC.
-*/
+static inline int start_row_for_pawn(bool white);
+static inline int dir_for_pawn(bool white);
+
+static inline int square_index(int r, int c) {
+  return (r << 3) | c;
+}
+
+static inline uint64_t square_bit(int r, int c) {
+  return 1ull << square_index(r, c);
+}
+
+static inline void invalidate_attacks(ChessState *s) {
+  s->attacks_valid = 0u;
+}
+
+static void recompute_attacks(ChessState *s);
+
+static inline void ensure_attacks(const ChessState *s) {
+  if (!s->attacks_valid) {
+    recompute_attacks((ChessState *)s);
+  }
+}
+
+static inline int is_enemy_piece(uint8_t p, bool white_piece) {
+  if (p == EMPTY) return 0;
+  return white_piece ? is_black_piece(p) : is_white_piece(p);
+}
+
+static inline int is_friendly_piece(uint8_t p, bool white_piece) {
+  if (p == EMPTY) return 0;
+  return white_piece ? is_white_piece(p) : is_black_piece(p);
+}
+
+static PieceList *piece_list_for_color(ChessState *s, bool white) {
+  return white ? &s->white_pieces : &s->black_pieces;
+}
+
+static const PieceList *piece_list_for_color_const(const ChessState *s, bool white) {
+  return white ? &s->white_pieces : &s->black_pieces;
+}
+
+static int piece_list_find_index(const PieceList *pl, int r, int c) {
+  for (int i = 0; i < 16; ++i) {
+    // Such a construct is needed for CBMC loop to be bounded
+    if (i >= pl->count)
+    {
+      break;
+    }
+    if (pl->row[i] == r && pl->col[i] == c) return i;
+  }
+  return -1;
+}
+
+static void piece_list_remove_index(PieceList *pl, int idx) {
+  if (idx < 0 || idx >= pl->count) return;
+  int last = pl->count - 1;
+  pl->piece[idx] = pl->piece[last];
+  pl->row[idx] = pl->row[last];
+  pl->col[idx] = pl->col[last];
+  pl->count = (uint8_t)last;
+}
+
+static void piece_list_remove_square(PieceList *pl, int r, int c) {
+  int idx = piece_list_find_index(pl, r, c);
+  if (idx >= 0) piece_list_remove_index(pl, idx);
+}
+
+static void piece_list_move_piece(PieceList *pl, int sr, int sc, int dr, int dc, uint8_t new_piece) {
+  int idx = piece_list_find_index(pl, sr, sc);
+  if (idx < 0) return;
+  pl->row[idx] = (int8_t)dr;
+  pl->col[idx] = (int8_t)dc;
+  pl->piece[idx] = new_piece;
+}
+
+static void recompute_attacks(ChessState *s) {
+  s->white_attacks = 0ull;
+  s->black_attacks = 0ull;
+
+  const PieceList *white = &s->white_pieces;
+  for (int i = 0; i < 16; ++i) {
+    // NOTE: such a construct is needed to keep the CBMC loop bounded
+    if (i >= white->count)
+    {
+      break;
+    }
+    uint8_t piece = white->piece[i];
+    int sr = white->row[i];
+    int sc = white->col[i];
+    int mt = piece_type(piece);
+
+    switch (mt) {
+      case 1: { /* Pawn */
+        int dir = dir_for_pawn(true);
+        int dr = sr + dir;
+        for (int off = -1; off <= 1; off += 2) {
+          int dc = sc + off;
+          if (in_bounds(dr, dc)) s->white_attacks |= square_bit(dr, dc);
+        }
+      } break;
+
+      case 2: { /* Knight */
+        static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
+        static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
+        for (int k = 0; k < 8; ++k) {
+          int dr = sr + kdr[k], dc = sc + kdc[k];
+          if (in_bounds(dr, dc)) s->white_attacks |= square_bit(dr, dc);
+        }
+      } break;
+
+      case 3: case 4: case 5: { /* Bishop/Rook/Queen sliders */
+        int dirs_r[8], dirs_c[8], nd = 0;
+        if (mt == 3 || mt == 5) {
+          dirs_r[nd] = -1; dirs_c[nd++] = -1;
+          dirs_r[nd] = -1; dirs_c[nd++] =  1;
+          dirs_r[nd] =  1; dirs_c[nd++] = -1;
+          dirs_r[nd] =  1; dirs_c[nd++] =  1;
+        }
+        if (mt == 4 || mt == 5) {
+          dirs_r[nd] = -1; dirs_c[nd++] =  0;
+          dirs_r[nd] =  1; dirs_c[nd++] =  0;
+          dirs_r[nd] =  0; dirs_c[nd++] = -1;
+          dirs_r[nd] =  0; dirs_c[nd++] =  1;
+        }
+        for (int d = 0; d < 8; ++d) {
+          // NOTE: such a construct is needed to keep the CBMC loop bounded
+          if (d >= nd)
+          {
+            break;
+          }
+          int stepr = dirs_r[d];
+          int stepc = dirs_c[d];
+          for (int step = 1; step <= 7; ++step) {
+            int dr = sr + stepr * step;
+            int dc = sc + stepc * step;
+            if (!in_bounds(dr, dc)) break;
+            uint8_t occ = s->board[dr][dc];
+            if (is_white_piece(occ)) break;
+            s->white_attacks |= square_bit(dr, dc);
+            if (occ != EMPTY) break;
+          }
+        }
+      } break;
+
+      case 6: { /* King */
+        // NOTE: such a construct is needed to keep the CBMC loop bounded
+        for (int tr = -1; tr <= +1; ++tr) {
+          for (int tc = -1; tc <= +1; ++tc) {
+            if (tr == 0 && tc == 0) continue;
+            int dr = sr + tr;
+            int dc = sc + tc;
+            if (in_bounds(dr, dc)) s->white_attacks |= square_bit(dr, dc);
+          }
+        }
+      } break;
+
+      default:
+        break;
+    }
+  }
+
+  const PieceList *black = &s->black_pieces;
+  for (int i = 0; i < 16; ++i) {
+    // NOTE: such a construct is needed to keep the CBMC loops bounded
+    if (i >= black->count)
+    {
+      break;
+    }
+    uint8_t piece = black->piece[i];
+    int sr = black->row[i];
+    int sc = black->col[i];
+    int mt = piece_type(piece);
+
+    switch (mt) {
+      case 1: { /* Pawn */
+        int dir = dir_for_pawn(false);
+        int dr = sr + dir;
+        for (int off = -1; off <= 1; off += 2) {
+          int dc = sc + off;
+          if (in_bounds(dr, dc)) s->black_attacks |= square_bit(dr, dc);
+        }
+      } break;
+
+      case 2: { /* Knight */
+        static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
+        static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
+        for (int k = 0; k < 8; ++k) {
+          int dr = sr + kdr[k], dc = sc + kdc[k];
+          if (in_bounds(dr, dc)) s->black_attacks |= square_bit(dr, dc);
+        }
+      } break;
+
+      case 3: case 4: case 5: {
+        int dirs_r[8], dirs_c[8], nd = 0;
+        if (mt == 3 || mt == 5) {
+          dirs_r[nd] = -1; dirs_c[nd++] = -1;
+          dirs_r[nd] = -1; dirs_c[nd++] =  1;
+          dirs_r[nd] =  1; dirs_c[nd++] = -1;
+          dirs_r[nd] =  1; dirs_c[nd++] =  1;
+        }
+        if (mt == 4 || mt == 5) {
+          dirs_r[nd] = -1; dirs_c[nd++] =  0;
+          dirs_r[nd] =  1; dirs_c[nd++] =  0;
+          dirs_r[nd] =  0; dirs_c[nd++] = -1;
+          dirs_r[nd] =  0; dirs_c[nd++] =  1;
+        }
+        for (int d = 0; d < 8; ++d) {
+          // NOTE: such a construct is needed for CBMC loops to be bounded
+          if (d >= nd)
+          {
+            break;
+          }
+          int stepr = dirs_r[d];
+          int stepc = dirs_c[d];
+          for (int step = 1; step <= 7; ++step) {
+            int dr = sr + stepr * step;
+            int dc = sc + stepc * step;
+            if (!in_bounds(dr, dc)) break;
+            uint8_t occ = s->board[dr][dc];
+            if (is_black_piece(occ)) break;
+            s->black_attacks |= square_bit(dr, dc);
+            if (occ != EMPTY) break;
+          }
+        }
+      } break;
+
+      case 6: {
+        // NOTE: such a construct is needed to keep the CBMC loop bounded
+        for (int tr = -1; tr <= +1; ++tr) {
+          for (int tc = -1; tc <= +1; ++tc) {
+            if (tr == 0 && tc == 0) continue;
+            int dr = sr + tr;
+            int dc = sc + tc;
+            if (in_bounds(dr, dc)) s->black_attacks |= square_bit(dr, dc);
+          }
+        }
+      } break;
+
+      default:
+        break;
+    }
+  }
+
+  s->attacks_valid = 1u;
+}
+
+/* === Attack detection === */
 static bool square_attacked_by(const ChessState *s, int r, int c, bool by_white) {
-  /* Pawns: if square (r,c) is attacked by a white pawn, such a pawn must be at (r+1,c±1);
-     for black, at (r-1,c±1). */
-  if (by_white) {
-    int pr = r + 1;
-    if (in_bounds(pr, c - 1) && s->board[pr][c - 1] == W_PAWN) return true;
-    if (in_bounds(pr, c + 1) && s->board[pr][c + 1] == W_PAWN) return true;
-  } else {
-    int pr = r - 1;
-    if (in_bounds(pr, c - 1) && s->board[pr][c - 1] == B_PAWN) return true;
-    if (in_bounds(pr, c + 1) && s->board[pr][c + 1] == B_PAWN) return true;
-  }
-
-  /* Knights */
-  static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
-  static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
-  for (int i = 0; i < 8; ++i) {
-    int rr = r + kdr[i], cc = c + kdc[i];
-    if (!in_bounds(rr, cc)) continue;
-    uint8_t p = s->board[rr][cc];
-    if (by_white ? (p == W_KNIGHT) : (p == B_KNIGHT)) return true;
-  }
-
-  /* King (adjacent) */
-  for (int dr = -1; dr <= 1; ++dr) {
-    for (int dc = -1; dc <= 1; ++dc) {
-      if (dr == 0 && dc == 0) continue;
-      int rr = r + dr, cc = c + dc;
-      if (!in_bounds(rr, cc)) continue;
-      uint8_t p = s->board[rr][cc];
-      if (by_white ? (p == W_KING) : (p == B_KING)) return true;
-    }
-  }
-
-  /* Orthogonal rays: Rooks/Queens */
-  {
-    int rr = r, cc = c;
-    /* up (-1,0) */
-    rr = r; cc = c;
-    for (int step = 1; step <= 7; ++step) {
-      rr -= 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_ROOK||p==W_QUEEN) : (p==B_ROOK||p==B_QUEEN)) return true; else break; }
-    }
-    /* down (+1,0) */
-    rr = r; cc = c;
-    for (int step = 1; step <= 7; ++step) {
-      rr += 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_ROOK||p==W_QUEEN) : (p==B_ROOK||p==B_QUEEN)) return true; else break; }
-    }
-    /* left (0,-1) */
-    rr = r; cc = c;
-    for (int step = 1; step <= 7; ++step) {
-      cc -= 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_ROOK||p==W_QUEEN) : (p==B_ROOK||p==B_QUEEN)) return true; else break; }
-    }
-    /* right (0,+1) */
-    rr = r; cc = c;
-    for (int step = 1; step <= 7; ++step) {
-      cc += 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_ROOK||p==W_QUEEN) : (p==B_ROOK||p==B_QUEEN)) return true; else break; }
-    }
-  }
-
-  /* Diagonal rays: Bishops/Queens */
-  {
-    int rr = r, cc = c;
-    /* up-left (-1,-1) */
-    rr = r; cc = c;
-    for (int step = 1; step <= 7; ++step) {
-      rr -= 1; cc -= 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_BISHOP||p==W_QUEEN) : (p==B_BISHOP||p==B_QUEEN)) return true; else break; }
-    }
-    /* up-right (-1,+1) */
-    rr = r; cc = c;
-
-    for (int step = 1; step <= 7; ++step) {
-      rr -= 1; cc += 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_BISHOP||p==W_QUEEN) : (p==B_BISHOP||p==B_QUEEN)) return true; else break; }
-    }
-    /* down-left (+1,-1) */
-    rr = r; cc = c;
-
-    for (int step = 1; step <= 7; ++step) {
-      rr += 1; cc -= 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_BISHOP||p==W_QUEEN) : (p==B_BISHOP||p==B_QUEEN)) return true; else break; }
-    }
-    /* down-right (+1,+1) */
-    rr = r; cc = c;
-
-    for (int step = 1; step <= 7; ++step) {
-      rr += 1; cc += 1;
-      if (!in_bounds(rr, cc)) break;
-      uint8_t p = s->board[rr][cc];
-      if (p != EMPTY) { if (by_white ? (p==W_BISHOP||p==W_QUEEN) : (p==B_BISHOP||p==B_QUEEN)) return true; else break; }
-    }
-  }
-
-  return false;
+  ensure_attacks(s);
+  uint64_t bits = by_white ? s->white_attacks : s->black_attacks;
+  return (bits & square_bit(r, c)) != 0ull;
 }
 
 static inline bool king_in_check(const ChessState *s, bool white) {
@@ -194,6 +329,7 @@ static bool is_legal_move_and_effects(const ChessState *s,
   if (mover == EMPTY) return false;
 
   bool white_to_move = s->white_to_move != 0u;
+  ensure_attacks(s);
   if (white_to_move ? !is_white_piece(mover) : !is_black_piece(mover)) return false;
 
   uint8_t target = s->board[dr][dc];
@@ -303,7 +439,6 @@ static bool is_legal_move_and_effects(const ChessState *s,
         bool kingside = (dcol == 2);
         int row = sr;
         int rook_c_from = kingside ? 7 : 0;
-        int rook_c_to   = kingside ? 5 : 3;
         /* Rights + pieces on original squares */
         if (white) {
           if (kingside && !(s->castle_rights & CR_WK)) return false;
@@ -342,6 +477,8 @@ static bool is_legal_move_and_effects(const ChessState *s,
 
   /* Simulate move to check king safety and to update king location/rights. */
   ChessState tmp = *s;
+  PieceList *tmp_our = piece_list_for_color(&tmp, white_to_move);
+  PieceList *tmp_opp = piece_list_for_color(&tmp, !white_to_move);
 
   /* En-passant removal if needed */
   if (piece_type(mover) == 1 && target == EMPTY && sc != dc) {
@@ -349,15 +486,21 @@ static bool is_legal_move_and_effects(const ChessState *s,
       int dir = dir_for_pawn(white_to_move);
       int cap_r = dr - dir, cap_c = dc;
       tmp.board[cap_r][cap_c] = EMPTY;
+      piece_list_remove_square(tmp_opp, cap_r, cap_c);
     }
   }
 
-  /* Move (and potentially castle rook) */
-  tmp.board[dr][dc] = mover;
-  tmp.board[sr][sc] = EMPTY;
+  if (target != EMPTY) {
+    piece_list_remove_square(tmp_opp, dr, dc);
+  }
 
-  /* Promotion -> queen */
-  if (*promotes_out) tmp.board[dr][dc] = white_to_move ? W_QUEEN : B_QUEEN;
+  uint8_t final_piece = mover;
+  if (*promotes_out) final_piece = white_to_move ? W_QUEEN : B_QUEEN;
+
+  /* Move (and potentially castle rook) */
+  tmp.board[dr][dc] = final_piece;
+  tmp.board[sr][sc] = EMPTY;
+  piece_list_move_piece(tmp_our, sr, sc, dr, dc, final_piece);
 
   /* Update en-passant */
   tmp.ep_row = -1; tmp.ep_col = -1;
@@ -379,6 +522,7 @@ static bool is_legal_move_and_effects(const ChessState *s,
       uint8_t rook = white_to_move ? W_ROOK : B_ROOK;
       tmp.board[row][rook_to_c] = rook;
       tmp.board[row][rook_from_c] = EMPTY;
+      piece_list_move_piece(tmp_our, row, rook_from_c, row, rook_to_c, rook);
     }
   } else {
     /* Moving any rook from its original square revokes that right */
@@ -393,6 +537,8 @@ static bool is_legal_move_and_effects(const ChessState *s,
   tmp.white_to_move = white_to_move ? 0u : 1u;
 
   /* Own king must not be in check after the move. */
+  invalidate_attacks(&tmp);
+  recompute_attacks(&tmp);
   if (king_in_check(&tmp, white_to_move)) return false;
 
   return true;
@@ -403,12 +549,15 @@ static void apply_move(ChessState *s, int sr, int sc, int dr, int dc) {
   uint8_t mover = s->board[sr][sc];
   uint8_t target = s->board[dr][dc];
   bool white_to_move = s->white_to_move != 0u;
+  PieceList *our = piece_list_for_color(s, white_to_move);
+  PieceList *opp = piece_list_for_color(s, !white_to_move);
 
   /* En-passant capture removal */
   if (piece_type(mover) == 1 && target == EMPTY && sc != dc && s->ep_row == dr && s->ep_col == dc) {
     int dir = dir_for_pawn(white_to_move);
     int cap_r = dr - dir, cap_c = dc;
     s->board[cap_r][cap_c] = EMPTY;
+    piece_list_remove_square(opp, cap_r, cap_c);
   }
 
   /* Detect castling (king moves two squares) before we overwrite the king square. */
@@ -416,14 +565,22 @@ static void apply_move(ChessState *s, int sr, int sc, int dr, int dc) {
   bool is_castle = is_king && (sr == dr) && ((dc - sc == 2) || (sc - dc == 2));
   bool castle_kingside = is_castle && (dc > sc);
 
+  if (target != EMPTY) {
+    piece_list_remove_square(opp, dr, dc);
+  }
+
+  uint8_t final_piece = mover;
+  if (piece_type(mover) == 1 && ((white_to_move && dr == 0) || (!white_to_move && dr == 7))) {
+    final_piece = white_to_move ? W_QUEEN : B_QUEEN;
+  }
+
   /* Move the piece */
-  s->board[dr][dc] = mover;
+  s->board[dr][dc] = final_piece;
   s->board[sr][sc] = EMPTY;
+  piece_list_move_piece(our, sr, sc, dr, dc, final_piece);
 
   /* Promotion to Queen */
-  if (piece_type(mover) == 1 && ((white_to_move && dr == 0) || (!white_to_move && dr == 7))) {
-    s->board[dr][dc] = white_to_move ? W_QUEEN : B_QUEEN;
-  }
+  /* final_piece already reflects promotion */
 
   /* Update en-passant */
   s->ep_row = -1; s->ep_col = -1;
@@ -445,6 +602,7 @@ static void apply_move(ChessState *s, int sr, int sc, int dr, int dc) {
       uint8_t rook = white_to_move ? W_ROOK : B_ROOK;
       s->board[row][rook_to_c] = rook;
       s->board[row][rook_from_c] = EMPTY;
+      piece_list_move_piece(our, row, rook_from_c, row, rook_to_c, rook);
     }
   } else {
     /* Revoke rook-side rights when rook moves or when a rook is captured on its home square. */
@@ -455,6 +613,9 @@ static void apply_move(ChessState *s, int sr, int sc, int dr, int dc) {
 
   /* Flip side to move */
   s->white_to_move = white_to_move ? 0u : 1u;
+
+  invalidate_attacks(s);
+  recompute_attacks(s);
 }
 
 /* Material evaluation: (White material) - (Black material). */
@@ -474,87 +635,83 @@ static int material_diff_white_minus_black(const ChessState *s) {
 /* ---- Move existence test (for mate/stalemate and for nondet side) ---- */
 static bool exists_any_legal_move(const ChessState *s) {
   bool side_white = s->white_to_move != 0u;
+  const PieceList *pl = piece_list_for_color_const(s, side_white);
 
-  for (int sr = 0; sr < 8; ++sr) {
-    for (int sc = 0; sc < 8; ++sc) {
-      uint8_t mover = s->board[sr][sc];
-      if (mover == EMPTY) continue;
-      if (side_white ? !is_white_piece(mover) : !is_black_piece(mover)) continue;
+  for (int idx = 0; idx < pl->count; ++idx) {
+    int sr = pl->row[idx];
+    int sc = pl->col[idx];
+    uint8_t mover = pl->piece[idx];
+    int mt = piece_type(mover);
 
-      int mt = piece_type(mover);
-
-      if (mt == 1) { /* Pawn: up to 4 targets */
-        int dir = dir_for_pawn(side_white);
-        int start_row = start_row_for_pawn(side_white);
-        int dr = sr + dir, dc = sc;
-        if (in_bounds(dr, dc) && s->board[dr][dc] == EMPTY) {
+    if (mt == 1) { /* Pawn: up to 4 targets */
+      int dir = dir_for_pawn(side_white);
+      int start_row = start_row_for_pawn(side_white);
+      int dr = sr + dir, dc = sc;
+      if (in_bounds(dr, dc) && s->board[dr][dc] == EMPTY) {
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
+      }
+      dr = sr + 2*dir; dc = sc;
+      if (sr == start_row && in_bounds(dr, dc) && s->board[sr + dir][dc] == EMPTY && s->board[dr][dc] == EMPTY) {
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
+      }
+      for (int off = -1; off <= 1; off += 2) {
+        dr = sr + dir; dc = sc + off;
+        if (!in_bounds(dr, dc)) continue;
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
+      }
+    } else if (mt == 2) { /* Knight */
+      static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
+      static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
+      for (int i = 0; i < 8; ++i) {
+        int dr = sr + kdr[i], dc = sc + kdc[i];
+        if (!in_bounds(dr, dc)) continue;
+        if (same_color(mover, s->board[dr][dc])) continue;
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
+      }
+    } else if (mt == 3 || mt == 4 || mt == 5) { /* Sliders */
+      int dirs_r[8], dirs_c[8], nd = 0;
+      if (mt == 3 || mt == 5) { /* bishop-like */
+        dirs_r[nd] = -1; dirs_c[nd++] = -1;
+        dirs_r[nd] = -1; dirs_c[nd++] =  1;
+        dirs_r[nd] =  1; dirs_c[nd++] = -1;
+        dirs_r[nd] =  1; dirs_c[nd++] =  1;
+      }
+      if (mt == 4 || mt == 5) { /* rook-like */
+        dirs_r[nd] = -1; dirs_c[nd++] =  0;
+        dirs_r[nd] =  1; dirs_c[nd++] =  0;
+        dirs_r[nd] =  0; dirs_c[nd++] = -1;
+        dirs_r[nd] =  0; dirs_c[nd++] =  1;
+      }
+      for (int d = 0; d < nd; ++d) {
+        int rr = sr + dirs_r[d];
+        int cc = sc + dirs_c[d];
+        for (int step = 1; step < 8 && in_bounds(rr, cc); ++step, rr += dirs_r[d], cc += dirs_c[d]) {
+          uint8_t dst = s->board[rr][cc];
+          if (same_color(mover, dst)) break;
           uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
+          if (is_legal_move_and_effects(s, sr, sc, rr, cc, &cap, &promo)) return true;
+          if (dst != EMPTY) break;
         }
-        dr = sr + 2*dir; dc = sc;
-        if (sr == start_row && in_bounds(dr, dc) && s->board[sr + dir][dc] == EMPTY && s->board[dr][dc] == EMPTY) {
-          uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
-        }
-        for (int off = -1; off <= 1; off += 2) {
-          dr = sr + dir; dc = sc + off;
-          if (!in_bounds(dr, dc)) continue;
-          uint8_t cap; bool promo;
-          /* Allow diag to empty only if en-passant square matches; is_legal will reject otherwise anyway. */
-          if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
-        }
-      } else if (mt == 2) { /* Knight */
-        static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
-        static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
-        for (int i = 0; i < 8; ++i) {
-          int dr = sr + kdr[i], dc = sc + kdc[i];
+      }
+    } else if (mt == 6) { /* King */
+      for (int dr = sr - 1; dr <= sr + 1; ++dr) {
+        for (int dc = sc - 1; dc <= sc + 1; ++dc) {
+          if (dr == sr && dc == sc) continue;
           if (!in_bounds(dr, dc)) continue;
           if (same_color(mover, s->board[dr][dc])) continue;
           uint8_t cap; bool promo;
           if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
         }
-      } else if (mt == 3 || mt == 4 || mt == 5) { /* Sliders */
-        int dirs_r[8], dirs_c[8], nd = 0;
-        if (mt == 3 || mt == 5) { /* bishop-like */
-          dirs_r[nd] = -1; dirs_c[nd++] = -1;
-          dirs_r[nd] = -1; dirs_c[nd++] =  1;
-          dirs_r[nd] =  1; dirs_c[nd++] = -1;
-          dirs_r[nd] =  1; dirs_c[nd++] =  1;
-        }
-        if (mt == 4 || mt == 5) { /* rook-like */
-          dirs_r[nd] = -1; dirs_c[nd++] =  0;
-          dirs_r[nd] =  1; dirs_c[nd++] =  0;
-          dirs_r[nd] =  0; dirs_c[nd++] = -1;
-          dirs_r[nd] =  0; dirs_c[nd++] =  1;
-        }
-        for (int d = 0; d < nd; ++d) {
-          int rr = sr + dirs_r[d], cc = sc + dirs_c[d];
-
-          for (int step = 1; step < 8 && in_bounds(rr, cc); ++step, rr += dirs_r[d], cc += dirs_c[d]) {
-            uint8_t dst = s->board[rr][cc];
-            if (same_color(mover, dst)) break;
-            uint8_t cap; bool promo;
-            if (is_legal_move_and_effects(s, sr, sc, rr, cc, &cap, &promo)) return true;
-            if (dst != EMPTY) break;
-          }
-        }
-      } else if (mt == 6) { /* King */
-        for (int dr = sr - 1; dr <= sr + 1; ++dr) {
-          for (int dc = sc - 1; dc <= sc + 1; ++dc) {
-            if (dr == sr && dc == sc) continue;
-            if (!in_bounds(dr, dc)) continue;
-            if (same_color(mover, s->board[dr][dc])) continue;
-            uint8_t cap; bool promo;
-            if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) return true;
-          }
-        }
-        /* Castling attempts: try both destinations explicitly; is_legal handles details. */
-        if (sr == (side_white ? 7 : 0) && sc == 4) {
-          int dest_k = 6, dest_q = 2;
-          uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, sr, dest_k, &cap, &promo)) return true;
-          if (is_legal_move_and_effects(s, sr, sc, sr, dest_q, &cap, &promo)) return true;
-        }
+      }
+      if (sr == (side_white ? 7 : 0) && sc == 4) {
+        int dest_k = 6, dest_q = 2;
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, sr, dest_k, &cap, &promo)) return true;
+        if (is_legal_move_and_effects(s, sr, sc, sr, dest_q, &cap, &promo)) return true;
       }
     }
   }
@@ -569,58 +726,94 @@ static bool choose_best_move_one_ply(const ChessState *s, bool root_white,
 {
   int baseS0 = material_diff_white_minus_black(s);
   int rootSign = root_white ? 1 : -1;
+  bool white_to_move = s->white_to_move != 0u;
+  if (white_to_move != root_white) return false;
 
   int bestScore = -2147483647; /* -INF */
   uint16_t bestCode = 0;
   bool found = false;
 
-  for (int sr = 0; sr < 8; ++sr) {
-    for (int sc = 0; sc < 8; ++sc) {
-      uint8_t mover = s->board[sr][sc];
-      if (mover == EMPTY) continue;
-      if (root_white ? !is_white_piece(mover) : !is_black_piece(mover)) continue;
+  const PieceList *pl = piece_list_for_color_const(s, white_to_move);
 
-      int mt = piece_type(mover);
-      bool white_to_move = s->white_to_move != 0u;
-      if (white_to_move != root_white) continue;
+  for (int idx = 0; idx < pl->count; ++idx) {
+    int sr = pl->row[idx];
+    int sc = pl->col[idx];
+    uint8_t mover = pl->piece[idx];
+    int mt = piece_type(mover);
 
-      if (mt == 1) {
-        int dir = dir_for_pawn(white_to_move);
-        int start_row = start_row_for_pawn(white_to_move);
+    if (mt == 1) {
+      int dir = dir_for_pawn(white_to_move);
+      int start_row = start_row_for_pawn(white_to_move);
 
-        int dr = sr + dir, dc = sc;
-        if (in_bounds(dr, dc) && s->board[dr][dc] == EMPTY) {
-          uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
-            int deltaS0 = promo ? (white_to_move ? +800 : -800) : 0;
-            int score = rootSign * (baseS0 + deltaS0);
-            if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
-          }
+      int dr = sr + dir, dc = sc;
+      if (in_bounds(dr, dc) && s->board[dr][dc] == EMPTY) {
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
+          int deltaS0 = promo ? (white_to_move ? +800 : -800) : 0;
+          int score = rootSign * (baseS0 + deltaS0);
+          if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
         }
-        dr = sr + 2*dir; dc = sc;
-        if (sr == start_row && in_bounds(dr, dc) && s->board[sr + dir][dc] == EMPTY && s->board[dr][dc] == EMPTY) {
-          uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
-            int score = rootSign * baseS0;
-            if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
-          }
+      }
+      dr = sr + 2*dir; dc = sc;
+      if (sr == start_row && in_bounds(dr, dc) && s->board[sr + dir][dc] == EMPTY && s->board[dr][dc] == EMPTY) {
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
+          int score = rootSign * baseS0;
+          if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
         }
-        for (int off = -1; off <= 1; off += 2) {
-          dr = sr + dir; dc = sc + off;
-          if (!in_bounds(dr, dc)) continue;
+      }
+      for (int off = -1; off <= 1; off += 2) {
+        dr = sr + dir; dc = sc + off;
+        if (!in_bounds(dr, dc)) continue;
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
+          int vcap = value_of_piece_code(cap);
+          int deltaS0 = (white_to_move ? +vcap : -vcap) + (promo ? (white_to_move ? +800 : -800) : 0);
+          int score = rootSign * (baseS0 + deltaS0);
+          if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
+        }
+      }
+    } else if (mt == 2) {
+      static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
+      static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
+      for (int i = 0; i < 8; ++i) {
+        int dr = sr + kdr[i], dc = sc + kdc[i];
+        if (!in_bounds(dr, dc)) continue;
+        if (same_color(mover, s->board[dr][dc])) continue;
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
+          int vcap = value_of_piece_code(cap);
+          int deltaS0 = white_to_move ? +vcap : -vcap;
+          int score = rootSign * (baseS0 + deltaS0);
+          if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
+        }
+      }
+    } else if (mt == 3 || mt == 4 || mt == 5) {
+      int dirs_r[8], dirs_c[8], nd = 0;
+      if (mt == 3 || mt == 5) { dirs_r[nd] = -1; dirs_c[nd++] = -1; dirs_r[nd] = -1; dirs_c[nd++] =  1;
+                                dirs_r[nd] =  1; dirs_c[nd++] = -1; dirs_r[nd] =  1; dirs_c[nd++] =  1; }
+      if (mt == 4 || mt == 5) { dirs_r[nd] = -1; dirs_c[nd++] =  0; dirs_r[nd] =  1; dirs_c[nd++] =  0;
+                                dirs_r[nd] =  0; dirs_c[nd++] = -1; dirs_r[nd] =  0; dirs_c[nd++] =  1; }
+      for (int d = 0; d < nd; ++d) {
+        int rr = sr + dirs_r[d], cc = sc + dirs_c[d];
+
+        for (int step = 1; step < 8 && in_bounds(rr, cc); ++step, rr += dirs_r[d], cc += dirs_c[d]) {
+          uint8_t dst = s->board[rr][cc];
+          if (same_color(mover, dst)) break;
           uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
+          if (is_legal_move_and_effects(s, sr, sc, rr, cc, &cap, &promo)) {
             int vcap = value_of_piece_code(cap);
-            int deltaS0 = (white_to_move ? +vcap : -vcap) + (promo ? (white_to_move ? +800 : -800) : 0);
+            int deltaS0 = white_to_move ? +vcap : -vcap;
             int score = rootSign * (baseS0 + deltaS0);
-            if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
+            if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, rr, cc); }
           }
+          if (dst != EMPTY) break;
         }
-      } else if (mt == 2) {
-        static const int kdr[8] = { -2,-2,-1,-1, 1, 1, 2, 2 };
-        static const int kdc[8] = { -1, 1,-2, 2,-2, 2,-1, 1 };
-        for (int i = 0; i < 8; ++i) {
-          int dr = sr + kdr[i], dc = sc + kdc[i];
+      }
+    } else if (mt == 6) {
+      for (int dr = sr - 1; dr <= sr + 1; ++dr) {
+        for (int dc = sc - 1; dc <= sc + 1; ++dc) {
+          if (dr == sr && dc == sc) continue;
           if (!in_bounds(dr, dc)) continue;
           if (same_color(mover, s->board[dr][dc])) continue;
           uint8_t cap; bool promo;
@@ -631,55 +824,17 @@ static bool choose_best_move_one_ply(const ChessState *s, bool root_white,
             if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
           }
         }
-      } else if (mt == 3 || mt == 4 || mt == 5) {
-        int dirs_r[8], dirs_c[8], nd = 0;
-        if (mt == 3 || mt == 5) { dirs_r[nd] = -1; dirs_c[nd++] = -1; dirs_r[nd] = -1; dirs_c[nd++] =  1;
-                                  dirs_r[nd] =  1; dirs_c[nd++] = -1; dirs_r[nd] =  1; dirs_c[nd++] =  1; }
-        if (mt == 4 || mt == 5) { dirs_r[nd] = -1; dirs_c[nd++] =  0; dirs_r[nd] =  1; dirs_c[nd++] =  0;
-                                  dirs_r[nd] =  0; dirs_c[nd++] = -1; dirs_r[nd] =  0; dirs_c[nd++] =  1; }
-        for (int d = 0; d < nd; ++d) {
-          int rr = sr + dirs_r[d], cc = sc + dirs_c[d];
-
-          for (int step = 1; step < 8 && in_bounds(rr, cc); ++step, rr += dirs_r[d], cc += dirs_c[d]) {
-            uint8_t dst = s->board[rr][cc];
-            if (same_color(mover, dst)) break;
-            uint8_t cap; bool promo;
-            if (is_legal_move_and_effects(s, sr, sc, rr, cc, &cap, &promo)) {
-              int vcap = value_of_piece_code(cap);
-              int deltaS0 = white_to_move ? +vcap : -vcap;
-              int score = rootSign * (baseS0 + deltaS0);
-              if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, rr, cc); }
-            }
-            if (dst != EMPTY) break;
-          }
+      }
+      if (sr == (root_white ? 7 : 0) && sc == 4) {
+        int dest_k = 6, dest_q = 2;
+        uint8_t cap; bool promo;
+        if (is_legal_move_and_effects(s, sr, sc, sr, dest_k, &cap, &promo)) {
+          int score = rootSign * (baseS0 + 30); /* tiny bonus */
+          if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, sr, dest_k); }
         }
-      } else if (mt == 6) {
-        for (int dr = sr - 1; dr <= sr + 1; ++dr) {
-          for (int dc = sc - 1; dc <= sc + 1; ++dc) {
-            if (dr == sr && dc == sc) continue;
-            if (!in_bounds(dr, dc)) continue;
-            if (same_color(mover, s->board[dr][dc])) continue;
-            uint8_t cap; bool promo;
-            if (is_legal_move_and_effects(s, sr, sc, dr, dc, &cap, &promo)) {
-              int vcap = value_of_piece_code(cap);
-              int deltaS0 = white_to_move ? +vcap : -vcap;
-              int score = rootSign * (baseS0 + deltaS0);
-              if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, dr, dc); }
-            }
-          }
-        }
-        /* Castling options (legal function does all checks) */
-        if (sr == (root_white ? 7 : 0) && sc == 4) {
-          int dest_k = 6, dest_q = 2;
-          uint8_t cap; bool promo;
-          if (is_legal_move_and_effects(s, sr, sc, sr, dest_k, &cap, &promo)) {
-            int score = rootSign * (baseS0 + 30); /* tiny bonus */
-            if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, sr, dest_k); }
-          }
-          if (is_legal_move_and_effects(s, sr, sc, sr, dest_q, &cap, &promo)) {
-            int score = rootSign * (baseS0 + 30);
-            if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, sr, dest_q); }
-          }
+        if (is_legal_move_and_effects(s, sr, sc, sr, dest_q, &cap, &promo)) {
+          int score = rootSign * (baseS0 + 30);
+          if (!found || score > bestScore) { found = true; bestScore = score; bestCode = encode12(sr, sc, sr, dest_q); }
         }
       }
     }

@@ -23,6 +23,19 @@ static inline int in_bounds(int r, int c)   { return (unsigned)r < 8u && (unsign
 /* Values in centipawns. */
 static const int PIECE_VALUE_BY_TYPE[7] = { 0, 100, 320, 330, 500, 900, 20000 };
 
+enum {
+  BOARD_DIM = 8,
+  BOARD_SQUARES = BOARD_DIM * BOARD_DIM,
+  MAX_PIECES_PER_SIDE = 16
+};
+
+typedef struct {
+  uint8_t count;
+  uint8_t piece[MAX_PIECES_PER_SIDE];
+  int8_t row[MAX_PIECES_PER_SIDE];
+  int8_t col[MAX_PIECES_PER_SIDE];
+} PieceList;
+
 /* Castling rights bitfield */
 enum {
   CR_WK = 1u,  /* White can castle king-side */
@@ -55,6 +68,11 @@ typedef struct {
   /* King positions to avoid scanning the board. -1 if captured (shouldn’t happen in legal play). */
   int8_t  w_king_r, w_king_c;
   int8_t  b_king_r, b_king_c;
+  PieceList white_pieces;
+  PieceList black_pieces;
+  uint64_t white_attacks;
+  uint64_t black_attacks;
+  uint8_t attacks_valid;
 } ChessState;
 
 /* Optional default starting position. */
@@ -74,7 +92,40 @@ static ChessState g_state = {
   .white_to_move = 1u,
   .castle_rights = (CR_WK|CR_WQ|CR_BK|CR_BQ),
   .w_king_r = 7, .w_king_c = 4,
-  .b_king_r = 0, .b_king_c = 4
+  .b_king_r = 0, .b_king_c = 4,
+  .white_pieces = {
+    .count = 16,
+    .piece = {
+      W_ROOK, W_KNIGHT, W_BISHOP, W_QUEEN, W_KING, W_BISHOP, W_KNIGHT, W_ROOK,
+      W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN, W_PAWN
+    },
+    .row = {
+      7,7,7,7,7,7,7,7,
+      6,6,6,6,6,6,6,6
+    },
+    .col = {
+      0,1,2,3,4,5,6,7,
+      0,1,2,3,4,5,6,7
+    }
+  },
+  .black_pieces = {
+    .count = 16,
+    .piece = {
+      B_ROOK, B_KNIGHT, B_BISHOP, B_QUEEN, B_KING, B_BISHOP, B_KNIGHT, B_ROOK,
+      B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN, B_PAWN
+    },
+    .row = {
+      0,0,0,0,0,0,0,0,
+      1,1,1,1,1,1,1,1
+    },
+    .col = {
+      0,1,2,3,4,5,6,7,
+      0,1,2,3,4,5,6,7
+    }
+  },
+  .white_attacks = 0ull,
+  .black_attacks = 0ull,
+  .attacks_valid = 0u
 };
 #endif
 
