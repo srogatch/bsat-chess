@@ -274,6 +274,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
       continue;
     }
     // We've found a move for our king!
+    nextCgs.blacksTurn_ = !cgs->blacksTurn_;
     Move oppMove;
     if (iamDeterm)
     {
@@ -302,6 +303,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
   {
     // No more moves available.
     // TODO: return the best available game outcome
+    return bestOutcome;
   }
   if (kingCheck.isCheck_)
   {
