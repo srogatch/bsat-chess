@@ -201,8 +201,11 @@ static bool is_legal_move_and_effects(const ChessState *s,
       if (ar != ac) return false;
       int stepr = (drow > 0) - (drow < 0);
       int stepc = (dcol > 0) - (dcol < 0);
-      for (int rr = sr + stepr, cc = sc + stepc; rr != dr || cc != dc; rr += stepr, cc += stepc) {
-        if (s->board[rr][cc] != EMPTY) return false;
+      for (int step = 1; step < 8; ++step) {
+        int rr = sr + stepr * step;
+        int cc = sc + stepc * step;
+        if (rr == dr && cc == dc) break;
+        if (!in_bounds(rr, cc) || s->board[rr][cc] != EMPTY) return false;
       }
     } break;
 
@@ -210,10 +213,11 @@ static bool is_legal_move_and_effects(const ChessState *s,
       if (!(drow == 0 || dcol == 0)) return false;
       int stepr = (drow > 0) - (drow < 0);
       int stepc = (dcol > 0) - (dcol < 0);
-      int rr = sr + stepr, cc = sc + stepc;
-      while (rr != dr || cc != dc) {
-        if (s->board[rr][cc] != EMPTY) return false;
-        rr += stepr; cc += stepc;
+      for (int step = 1; step < 8; ++step) {
+        int rr = sr + stepr * step;
+        int cc = sc + stepc * step;
+        if (rr == dr && cc == dc) break;
+        if (!in_bounds(rr, cc) || s->board[rr][cc] != EMPTY) return false;
       }
     } break;
 
@@ -223,10 +227,11 @@ static bool is_legal_move_and_effects(const ChessState *s,
       if (!rook_like && !bishop_like) return false;
       int stepr = (drow > 0) - (drow < 0);
       int stepc = (dcol > 0) - (dcol < 0);
-      int rr = sr + stepr, cc = sc + stepc;
-      while (rr != dr || cc != dc) {
-        if (s->board[rr][cc] != EMPTY) return false;
-        rr += stepr; cc += stepc;
+      for (int step = 1; step < 8; ++step) {
+        int rr = sr + stepr * step;
+        int cc = sc + stepc * step;
+        if (rr == dr && cc == dc) break;
+        if (!in_bounds(rr, cc) || s->board[rr][cc] != EMPTY) return false;
       }
     } break;
 
