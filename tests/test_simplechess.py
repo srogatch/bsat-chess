@@ -81,6 +81,7 @@ def ensure_simple_library(repo_root: Path) -> ctypes.CDLL:
                 "-shared",
                 "-fPIC",
                 "-DSIMPLE_CHESS_LIBRARY",
+                "-DSIMPLE_CHESS_EXTERNAL_ENGINE",
                 "-o",
                 str(lib_path),
                 *(str(src) for src in sources),
