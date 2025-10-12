@@ -16,12 +16,6 @@ typedef struct
 {
   uint8_t row_ : 3;
   uint8_t col_ : 3;
-} Position;
-
-typedef struct
-{
-  uint8_t row_ : 3;
-  uint8_t col_ : 3;
   uint8_t ft_ : 2; // FigureTypes
 } FigurePos;
 
@@ -30,12 +24,12 @@ typedef struct
 
 typedef struct
 {
-  Position kingPos_;
+  FigurePos kingPos_; // ft_ field is ignored
   // First nFigs_ entries below correspond to figures (not pawns or the king)
   // Following nPawns_ positions correspond to pawns with ft_ field ignored
   FigurePos fps_[MAX_PLAYER_FIGURES];
-  uint8_t nPawns_ : 4; // 0..8
   uint8_t nFigs_ : 4; // 0..15
+  uint8_t nPawns_ : 4; // 0..8
 } PlayerPieces;
 
 typedef enum
@@ -51,3 +45,23 @@ typedef struct
   PlayerPieces blacks_;
   uint8_t whoseTurn_ : 1;
 } ChessBoard;
+
+typedef struct
+{
+  uint16_t srcRow_ : 3;
+  uint16_t srcCol_ : 3;
+  uint16_t dstRow_ : 3;
+  uint16_t dstCol_ : 3;
+} Move;
+
+#include "GenChessboard.h"
+
+extern unsigned short nondet_ushort();
+
+int main()
+{
+  ChessBoard board;
+  PutInitial(&board);
+
+  return 0;
+}
