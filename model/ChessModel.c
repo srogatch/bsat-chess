@@ -81,7 +81,12 @@ typedef struct {
 } MoveDesc;
 
 #define MAX_LEGAL_MOVES 256
-#define MAX_GAME_SEQ 256
+// Number of one-player turns (semi-rounds)
+#define MAX_GAME_SEQ 64
+
+typedef struct {
+  uint64_t attack_map[2];
+} BoardAnalysis;
 
 static inline bool IsInside(int r, int c) {
   return (0 <= r && r < 8 && 0 <= c && c < 8);
@@ -103,7 +108,7 @@ static inline bool AttackMapTest(uint64_t map, int row, int col) {
   return ((map >> idx) & 1ULL) != 0;
 }
 
-static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color);
+static void AnalyzeBoard(const Chessboard *board, BoardAnalysis *analysis);
 
 static inline int FigColor(Figure f) {
   if (f == NoFig)
@@ -179,8 +184,9 @@ static bool KingInCheck(const Chessboard *board, int color) {
   int col = -1;
   if (!FindKing(board, color, &row, &col))
     return true;
-  const uint64_t attacks = ComputeAttackMap(board, 1 - color);
-  return AttackMapTest(attacks, row, col);
+  BoardAnalysis analysis;
+  AnalyzeBoard(board, &analysis);
+  return AttackMapTest(analysis.attack_map[1 - color], row, col);
 }
 
 static void ApplyMove(const Chessboard *from, Chessboard *to, const MoveDesc *mv) {
@@ -217,11 +223,13 @@ static bool AppendMove(const Chessboard *board, int color, MoveDesc *list, int *
 static bool AddPawnMoves(const Chessboard *board, int color, int r, int c, bool allow_en_passant, const EnPassantInfo *ep_info, MoveDesc *list, int *count, int max_count);
 static bool AddKnightMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count);
 static bool AddSlidingMoves(const Chessboard *board, int color, int r, int c, const int (*dirs)[2], int dir_count, MoveDesc *list, int *count, int max_count);
-static bool AddKingMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count);
-static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, MoveDesc *list, int *count, int max_count);
+static bool AddKingMoves(const Chessboard *board, int color, int r, int c, const BoardAnalysis *analysis, MoveDesc *list, int *count, int max_count);
+static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, const BoardAnalysis *analysis, MoveDesc *list, int *count, int max_count);
 
 static void GenerateLegalMoves(const Chessboard *board, int color, bool allow_en_passant, const EnPassantInfo *ep_info, MoveDesc *list, int *count, int max_count) {
   *count = 0;
+  BoardAnalysis analysis;
+  AnalyzeBoard(board, &analysis);
   for (int r = 0; r < 8; ++r) {
     for (int c = 0; c < 8; ++c) {
       const Figure f = FigAt(board, r, c);
@@ -254,7 +262,7 @@ static void GenerateLegalMoves(const Chessboard *board, int color, bool allow_en
           break;
         }
         case PieceKing:
-          ok = AddKingMoves(board, color, r, c, list, count, max_count);
+          ok = AddKingMoves(board, color, r, c, &analysis, list, count, max_count);
           break;
         case PieceNone:
         default:
@@ -387,7 +395,8 @@ static bool AddSlidingMoves(const Chessboard *board, int color, int r, int c, co
   return true;
 }
 
-static bool AddKingMoves(const Chessboard *board, int color, int r, int c, MoveDesc *list, int *count, int max_count) {
+static bool AddKingMoves(const Chessboard *board, int color, int r, int c, const BoardAnalysis *analysis, MoveDesc *list, int *count, int max_count) {
+  assert(analysis);
   for (int dr = -1; dr <= 1; ++dr) {
     for (int dc = -1; dc <= 1; ++dc) {
       if (dr == 0 && dc == 0)
@@ -405,10 +414,10 @@ static bool AddKingMoves(const Chessboard *board, int color, int r, int c, MoveD
     }
   }
 
-  if (KingInCheck(board, color))
+  if (AttackMapTest(analysis->attack_map[1 - color], r, c))
     return true;
 
-  return AddCastlingMoves(board, color, r, c, list, count, max_count);
+  return AddCastlingMoves(board, color, r, c, analysis, list, count, max_count);
 }
 
 static void AddSlidingAttacks(const Chessboard *board, int attacker_color, int r, int c, const int (*dirs)[2], int dir_count, uint64_t *map) {
@@ -430,23 +439,26 @@ static void AddSlidingAttacks(const Chessboard *board, int attacker_color, int r
   }
 }
 
-static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color) {
-  assert(attacker_color == ColorWhite || attacker_color == ColorBlack);
-  uint64_t map = 0ULL;
+static void AnalyzeBoard(const Chessboard *board, BoardAnalysis *analysis) {
+  assert(analysis);
+  analysis->attack_map[ColorWhite] = 0ULL;
+  analysis->attack_map[ColorBlack] = 0ULL;
 
   for (int r = 0; r < 8; ++r) {
     for (int c = 0; c < 8; ++c) {
       const Figure f = FigAt(board, r, c);
-      if (FigColor(f) != attacker_color)
+      const int attacker_color = FigColor(f);
+      if (attacker_color != ColorWhite && attacker_color != ColorBlack)
         continue;
+      uint64_t *map = &analysis->attack_map[attacker_color];
       switch (FigPiece(f)) {
         case PiecePawn: {
           const int forward = (attacker_color == ColorWhite) ? -1 : 1;
           const int nr = r + forward;
           if (IsInside(nr, c - 1))
-            AttackMapSet(&map, nr, c - 1);
+            AttackMapSet(map, nr, c - 1);
           if (IsInside(nr, c + 1))
-            AttackMapSet(&map, nr, c + 1);
+            AttackMapSet(map, nr, c + 1);
           break;
         }
         case PieceKnight: {
@@ -458,25 +470,25 @@ static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color) {
             const int nc = c + offsets[i][1];
             if (!IsInside(nr, nc))
               continue;
-            AttackMapSet(&map, nr, nc);
+            AttackMapSet(map, nr, nc);
           }
           break;
         }
         case PieceBishop: {
           static const int dirs[4][2] = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-          AddSlidingAttacks(board, attacker_color, r, c, dirs, 4, &map);
+          AddSlidingAttacks(board, attacker_color, r, c, dirs, 4, map);
           break;
         }
         case PieceRook: {
           static const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-          AddSlidingAttacks(board, attacker_color, r, c, dirs, 4, &map);
+          AddSlidingAttacks(board, attacker_color, r, c, dirs, 4, map);
           break;
         }
         case PieceQueen: {
           static const int dirs[8][2] = {
             {1, 0},  {-1, 0}, {0, 1},  {0, -1},
             {1, 1},  {1, -1}, {-1, 1}, {-1, -1}};
-          AddSlidingAttacks(board, attacker_color, r, c, dirs, 8, &map);
+          AddSlidingAttacks(board, attacker_color, r, c, dirs, 8, map);
           break;
         }
         case PieceKing: {
@@ -488,7 +500,7 @@ static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color) {
               const int nc = c + dc;
               if (!IsInside(nr, nc))
                 continue;
-              AttackMapSet(&map, nr, nc);
+              AttackMapSet(map, nr, nc);
             }
           }
           break;
@@ -499,16 +511,15 @@ static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color) {
       }
     }
   }
-
-  return map;
 }
 
-static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, MoveDesc *list, int *count, int max_count) {
+static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, const BoardAnalysis *analysis, MoveDesc *list, int *count, int max_count) {
   const int opponent = 1 - color;
   const int king_targets[2] = {6, 2};
   const int rook_targets[2] = {5, 3};
   const int directions[2] = {1, -1};  // kingside, queenside
-  const uint64_t board_attacks = ComputeAttackMap(board, opponent);
+  assert(analysis);
+  const uint64_t board_attacks = analysis->attack_map[opponent];
 
   for (int side = 0; side < 2; ++side) {
     const int dir = directions[side];
@@ -615,7 +626,9 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
     Chessboard tmp = *board;
     SetFig(&tmp, king_row, king_col, NoFig);
     SetFig(&tmp, king_row, rook_col, NoFig);
-    const uint64_t tmp_attacks = ComputeAttackMap(&tmp, opponent);
+    BoardAnalysis tmp_analysis;
+    AnalyzeBoard(&tmp, &tmp_analysis);
+    const uint64_t tmp_attacks = tmp_analysis.attack_map[opponent];
 
     bool safe_path = true;
     if (king_target_col != king_col) {
