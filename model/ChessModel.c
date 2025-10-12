@@ -87,6 +87,24 @@ static inline bool IsInside(int r, int c) {
   return (0 <= r && r < 8 && 0 <= c && c < 8);
 }
 
+static inline int SquareIndex(int row, int col) {
+  return row * 8 + col;
+}
+
+static inline void AttackMapSet(uint64_t *map, int row, int col) {
+  assert(IsInside(row, col));
+  const int idx = SquareIndex(row, col);
+  *map |= (uint64_t)1 << idx;
+}
+
+static inline bool AttackMapTest(uint64_t map, int row, int col) {
+  assert(IsInside(row, col));
+  const int idx = SquareIndex(row, col);
+  return ((map >> idx) & 1ULL) != 0;
+}
+
+static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color);
+
 static inline int FigColor(Figure f) {
   if (f == NoFig)
     return ColorNone;
@@ -156,14 +174,13 @@ static bool FindKing(const Chessboard *board, int color, int *row, int *col) {
   return false;
 }
 
-static bool IsSquareAttacked(const Chessboard *board, int target_row, int target_col, int attacker_color);
-
 static bool KingInCheck(const Chessboard *board, int color) {
   int row = -1;
   int col = -1;
   if (!FindKing(board, color, &row, &col))
     return true;
-  return IsSquareAttacked(board, row, col, 1 - color);
+  const uint64_t attacks = ComputeAttackMap(board, 1 - color);
+  return AttackMapTest(attacks, row, col);
 }
 
 static void ApplyMove(const Chessboard *from, Chessboard *to, const MoveDesc *mv) {
@@ -348,9 +365,11 @@ static bool AddKnightMoves(const Chessboard *board, int color, int r, int c, Mov
 
 static bool AddSlidingMoves(const Chessboard *board, int color, int r, int c, const int (*dirs)[2], int dir_count, MoveDesc *list, int *count, int max_count) {
   for (int d = 0; d < dir_count; ++d) {
-    int nr = r + dirs[d][0];
-    int nc = c + dirs[d][1];
-    while (IsInside(nr, nc)) {
+    for (int step = 1; step < 8; ++step) {
+      const int nr = r + dirs[d][0] * step;
+      const int nc = c + dirs[d][1] * step;
+      if (!IsInside(nr, nc))
+        break;
       const Figure target = FigAt(board, nr, nc);
       if (target != NoFig) {
         if (FigColor(target) != color) {
@@ -363,8 +382,6 @@ static bool AddSlidingMoves(const Chessboard *board, int color, int r, int c, co
       MoveDesc mv = {r, c, nr, nc, NoFig, false, -1, -1};
       if (!AppendMove(board, color, list, count, max_count, &mv))
         return false;
-      nr += dirs[d][0];
-      nc += dirs[d][1];
     }
   }
   return true;
@@ -394,88 +411,96 @@ static bool AddKingMoves(const Chessboard *board, int color, int r, int c, MoveD
   return AddCastlingMoves(board, color, r, c, list, count, max_count);
 }
 
-static bool IsSquareAttacked(const Chessboard *board, int target_row, int target_col, int attacker_color) {
-  assert(IsInside(target_row, target_col));
-
-  const int pawn_row_offset = (attacker_color == ColorWhite) ? 1 : -1;
-  for (int dc = -1; dc <= 1; dc += 2) {
-    const int r = target_row + pawn_row_offset;
-    const int c = target_col + dc;
-    if (IsInside(r, c)) {
-      const Figure f = FigAt(board, r, c);
-      if (f != NoFig && FigColor(f) == attacker_color && FigPiece(f) == PiecePawn)
-        return true;
-    }
-  }
-
-  static const int knight_offsets[8][2] = {
-    {-2, -1}, {-2, 1}, {-1, -2}, {-1, 2},
-    {1, -2},  {1, 2},  {2, -1},  {2, 1}};
-  for (int i = 0; i < 8; ++i) {
-    const int r = target_row + knight_offsets[i][0];
-    const int c = target_col + knight_offsets[i][1];
-    if (!IsInside(r, c))
-      continue;
-    const Figure f = FigAt(board, r, c);
-    if (f != NoFig && FigColor(f) == attacker_color && FigPiece(f) == PieceKnight)
-      return true;
-  }
-
-  const int rook_dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-  for (int d = 0; d < 4; ++d) {
-    int r = target_row + rook_dirs[d][0];
-    int c = target_col + rook_dirs[d][1];
-    while (IsInside(r, c)) {
-      const Figure f = FigAt(board, r, c);
-      if (f == NoFig) {
-        r += rook_dirs[d][0];
-        c += rook_dirs[d][1];
+static void AddSlidingAttacks(const Chessboard *board, int attacker_color, int r, int c, const int (*dirs)[2], int dir_count, uint64_t *map) {
+  for (int d = 0; d < dir_count; ++d) {
+    for (int step = 1; step < 8; ++step) {
+      const int nr = r + dirs[d][0] * step;
+      const int nc = c + dirs[d][1] * step;
+      if (!IsInside(nr, nc))
+        break;
+      const Figure target = FigAt(board, nr, nc);
+      if (target == NoFig) {
+        AttackMapSet(map, nr, nc);
         continue;
       }
-      if (FigColor(f) == attacker_color) {
-        const PieceType type = FigPiece(f);
-        if (type == PieceRook || type == PieceQueen)
-          return true;
-      }
+      if (FigColor(target) != attacker_color)
+        AttackMapSet(map, nr, nc);
       break;
     }
   }
+}
 
-  const int bishop_dirs[4][2] = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-  for (int d = 0; d < 4; ++d) {
-    int r = target_row + bishop_dirs[d][0];
-    int c = target_col + bishop_dirs[d][1];
-    while (IsInside(r, c)) {
+static uint64_t ComputeAttackMap(const Chessboard *board, int attacker_color) {
+  assert(attacker_color == ColorWhite || attacker_color == ColorBlack);
+  uint64_t map = 0ULL;
+
+  for (int r = 0; r < 8; ++r) {
+    for (int c = 0; c < 8; ++c) {
       const Figure f = FigAt(board, r, c);
-      if (f == NoFig) {
-        r += bishop_dirs[d][0];
-        c += bishop_dirs[d][1];
+      if (FigColor(f) != attacker_color)
         continue;
+      switch (FigPiece(f)) {
+        case PiecePawn: {
+          const int forward = (attacker_color == ColorWhite) ? -1 : 1;
+          const int nr = r + forward;
+          if (IsInside(nr, c - 1))
+            AttackMapSet(&map, nr, c - 1);
+          if (IsInside(nr, c + 1))
+            AttackMapSet(&map, nr, c + 1);
+          break;
+        }
+        case PieceKnight: {
+          static const int offsets[8][2] = {
+            {-2, -1}, {-2, 1}, {-1, -2}, {-1, 2},
+            {1, -2},  {1, 2},  {2, -1},  {2, 1}};
+          for (int i = 0; i < 8; ++i) {
+            const int nr = r + offsets[i][0];
+            const int nc = c + offsets[i][1];
+            if (!IsInside(nr, nc))
+              continue;
+            AttackMapSet(&map, nr, nc);
+          }
+          break;
+        }
+        case PieceBishop: {
+          static const int dirs[4][2] = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+          AddSlidingAttacks(board, attacker_color, r, c, dirs, 4, &map);
+          break;
+        }
+        case PieceRook: {
+          static const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+          AddSlidingAttacks(board, attacker_color, r, c, dirs, 4, &map);
+          break;
+        }
+        case PieceQueen: {
+          static const int dirs[8][2] = {
+            {1, 0},  {-1, 0}, {0, 1},  {0, -1},
+            {1, 1},  {1, -1}, {-1, 1}, {-1, -1}};
+          AddSlidingAttacks(board, attacker_color, r, c, dirs, 8, &map);
+          break;
+        }
+        case PieceKing: {
+          for (int dr = -1; dr <= 1; ++dr) {
+            for (int dc = -1; dc <= 1; ++dc) {
+              if (dr == 0 && dc == 0)
+                continue;
+              const int nr = r + dr;
+              const int nc = c + dc;
+              if (!IsInside(nr, nc))
+                continue;
+              AttackMapSet(&map, nr, nc);
+            }
+          }
+          break;
+        }
+        case PieceNone:
+        default:
+          break;
       }
-      if (FigColor(f) == attacker_color) {
-        const PieceType type = FigPiece(f);
-        if (type == PieceBishop || type == PieceQueen)
-          return true;
-      }
-      break;
     }
   }
 
-  for (int dr = -1; dr <= 1; ++dr) {
-    for (int dc = -1; dc <= 1; ++dc) {
-      if (dr == 0 && dc == 0)
-        continue;
-      const int r = target_row + dr;
-      const int c = target_col + dc;
-      if (!IsInside(r, c))
-        continue;
-      const Figure f = FigAt(board, r, c);
-      if (f != NoFig && FigColor(f) == attacker_color && FigPiece(f) == PieceKing)
-        return true;
-    }
-  }
-
-  return false;
+  return map;
 }
 
 static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, int king_col, MoveDesc *list, int *count, int max_count) {
@@ -483,6 +508,7 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
   const int king_targets[2] = {6, 2};
   const int rook_targets[2] = {5, 3};
   const int directions[2] = {1, -1};  // kingside, queenside
+  const uint64_t board_attacks = ComputeAttackMap(board, opponent);
 
   for (int side = 0; side < 2; ++side) {
     const int dir = directions[side];
@@ -496,13 +522,13 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
       continue;
 
     int rook_col = -1;
-    int c = king_col + dir;
-    while (0 <= c && c < 8) {
+    for (int step = 1; step < 8; ++step) {
+      const int c = king_col + dir * step;
+      if (!IsInside(king_row, c))
+        break;
       const Figure piece = FigAt(board, king_row, c);
-      if (piece == NoFig) {
-        c += dir;
+      if (piece == NoFig)
         continue;
-      }
       if (FigColor(piece) == color && FigPiece(piece) == PieceRook)
         rook_col = c;
       break;
@@ -511,7 +537,14 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
       continue;
 
     bool clear_between = true;
-    for (int cc = king_col + dir; cc != rook_col; cc += dir) {
+    for (int step = 1; step < 8; ++step) {
+      const int cc = king_col + dir * step;
+      if (!IsInside(king_row, cc)) {
+        clear_between = false;
+        break;
+      }
+      if (cc == rook_col)
+        break;
       if (FigAt(board, king_row, cc) != NoFig) {
         clear_between = false;
         break;
@@ -522,23 +555,50 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
 
     bool king_path_clear = true;
     if (king_target_col != king_col) {
-      int step = (king_target_col > king_col) ? 1 : -1;
-      for (int cc = king_col + step; cc != king_target_col + step; cc += step) {
-        if (cc == rook_col)
+      const int step = (king_target_col > king_col) ? 1 : -1;
+      bool reached_target = false;
+      for (int iter = 1; iter < 8; ++iter) {
+        const int cc = king_col + step * iter;
+        if (!IsInside(king_row, cc)) {
+          king_path_clear = false;
+          break;
+        }
+        if (cc == rook_col) {
+          if (cc == king_target_col) {
+            reached_target = true;
+            break;
+          }
           continue;
+        }
         if (FigAt(board, king_row, cc) != NoFig) {
           king_path_clear = false;
           break;
         }
+        if (cc == king_target_col) {
+          reached_target = true;
+          break;
+        }
       }
+      if (!reached_target)
+        king_path_clear = false;
       if (!king_path_clear)
         continue;
     }
 
     bool rook_path_clear = true;
     if (rook_target_col != rook_col) {
-      int step = (rook_target_col > rook_col) ? 1 : -1;
-      for (int cc = rook_col + step; cc != rook_target_col + step; cc += step) {
+      const int step = (rook_target_col > rook_col) ? 1 : -1;
+      bool reached_rook_target = false;
+      for (int iter = 1; iter < 8; ++iter) {
+        const int cc = rook_col + step * iter;
+        if (!IsInside(king_row, cc)) {
+          rook_path_clear = false;
+          break;
+        }
+        if (cc == rook_target_col) {
+          reached_rook_target = true;
+          break;
+        }
         if (cc == king_col)
           continue;
         if (FigAt(board, king_row, cc) != NoFig) {
@@ -546,29 +606,46 @@ static bool AddCastlingMoves(const Chessboard *board, int color, int king_row, i
           break;
         }
       }
+      if (!reached_rook_target)
+        rook_path_clear = false;
       if (!rook_path_clear)
         continue;
     }
 
     Chessboard tmp = *board;
-    const Figure king = FigAt(board, king_row, king_col);
     SetFig(&tmp, king_row, king_col, NoFig);
     SetFig(&tmp, king_row, rook_col, NoFig);
+    const uint64_t tmp_attacks = ComputeAttackMap(&tmp, opponent);
 
     bool safe_path = true;
     if (king_target_col != king_col) {
       const int step = (king_target_col > king_col) ? 1 : -1;
-      for (int cc = king_col + step;; cc += step) {
-        SetFig(&tmp, king_row, cc, king);
-        if (IsSquareAttacked(&tmp, king_row, cc, opponent)) {
+      bool reached_target = false;
+      for (int iter = 1; iter < 8; ++iter) {
+        const int cc = king_col + step * iter;
+        if (!IsInside(king_row, cc)) {
           safe_path = false;
           break;
         }
-        SetFig(&tmp, king_row, cc, NoFig);
-        if (cc == king_target_col)
+        if (cc == rook_col) {
+          if (cc == king_target_col) {
+            reached_target = true;
+            break;
+          }
+          continue;
+        }
+        if (AttackMapTest(tmp_attacks, king_row, cc)) {
+          safe_path = false;
           break;
+        }
+        if (cc == king_target_col) {
+          reached_target = true;
+          break;
+        }
       }
-    } else if (IsSquareAttacked(board, king_row, king_col, opponent)) {
+      if (!reached_target)
+        safe_path = false;
+    } else if (AttackMapTest(board_attacks, king_row, king_col)) {
       safe_path = false;
     }
     if (!safe_path)
@@ -745,8 +822,10 @@ int main()
   }
   int best_move = -1;
   int my_win = -1; // set it to a loss, so that even a stalemate or uncertainty is better
-  for (int i=0; i<move_count; ++i)
+  for (int i = 0; i < MAX_LEGAL_MOVES; ++i)
   {
+    if (i >= move_count)
+      break;
     char moveBuffer[32];
     FormatMove(&moves[i], moveBuffer, sizeof(moveBuffer));
     Chessboard nextBoard = board;
@@ -838,8 +917,10 @@ int main()
       }
 
       bool winningReply = false;
-      for (int r = 0; r < responseCount; ++r)
+      for (int r = 0; r < MAX_LEGAL_MOVES; ++r)
       {
+        if (r >= responseCount)
+          break;
         Chessboard afterResponse;
         ApplyMove(&afterOpponent, &afterResponse, &responseMoves[r]);
         MoveCat responseOutcome = CategorizeMove(&afterOpponent, &afterResponse);
