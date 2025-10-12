@@ -4,6 +4,13 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifndef __CPROVER_assert
+#define __CPROVER_assert(expr, msg) do { (void)(msg); assert(expr); } while (0)
+#endif
+#ifndef __CPROVER_assume
+#define __CPROVER_assume(expr) do { bool __cp_assume_cond = (expr); if (!__cp_assume_cond) assert(__cp_assume_cond); } while (0)
+#endif
+
 #ifndef SIMPLE_CHESS_EXTERNAL_ENGINE
 
 typedef enum {
@@ -610,10 +617,6 @@ static bool Chess_KingInCheck(const Chessboard *board, int color) {
   return KingInCheckInternal(board, color);
 }
 
-static bool Chess_FindKing(const Chessboard *board, int color, int *row, int *col) {
-  return FindKing(board, color, row, col);
-}
-
 static void PutInitial(Chessboard *board) {
   for (int r = 0; r < 8; ++r) {
     for (int c = 0; c < 4; ++c) {
@@ -667,14 +670,6 @@ typedef struct {
   EnPassantInfo ep_info;
 } GameState;
 
-#ifndef SIMPLE_CHESS_LIBRARY
-typedef struct {
-  MoveDesc move;
-  SimpleOutcome outcome;
-  bool has_move;
-} BestMoveResult;
-#endif
-
 static inline bool OutcomeIsWinFor(SimpleOutcome outcome, int color) {
   if (outcome == SimpleOutcomeDraw)
     return false;
@@ -691,7 +686,6 @@ static inline bool OutcomeIsLossFor(SimpleOutcome outcome, int color) {
   return outcome == SimpleOutcomeWhiteWin;
 }
 
-#ifndef SIMPLE_CHESS_LIBRARY
 static inline int OutcomeScore(SimpleOutcome outcome, int color) {
   if (OutcomeIsWinFor(outcome, color))
     return 1;
@@ -705,7 +699,6 @@ static inline bool OutcomeBetter(SimpleOutcome lhs, SimpleOutcome rhs, int color
   const int rhs_score = OutcomeScore(rhs, color);
   return lhs_score > rhs_score;
 }
-#endif
 
 static EnPassantInfo ComputeNextEnPassant(const Chessboard *board, const MoveDesc *mv) {
   EnPassantInfo info = {false, 0, 0};
@@ -725,11 +718,7 @@ static EnPassantInfo ComputeNextEnPassant(const Chessboard *board, const MoveDes
 static SimpleOutcome EvaluatePosition(const GameState *state, int depth_left);
 
 #ifndef SIMPLE_CHESS_LIBRARY
-static BestMoveResult FindBestMove(const GameState *state, int depth_left) {
-  BestMoveResult result;
-  result.has_move = false;
-  result.outcome = (state->whose_turn == ColorWhite) ? SimpleOutcomeBlackWin : SimpleOutcomeWhiteWin;
-
+static bool FindBestMove(const GameState *state, int depth_left, MoveDesc *best_move, SimpleOutcome *best_outcome) {
   const EnPassantInfo *ep_ptr = state->ep_info.available ? &state->ep_info : NULL;
   MoveDesc moves[MAX_LEGAL_MOVES];
   const int move_count = Chess_GenerateLegalMoves(&state->board,
@@ -739,7 +728,11 @@ static BestMoveResult FindBestMove(const GameState *state, int depth_left) {
                                                   moves,
                                                   MAX_LEGAL_MOVES);
   if (move_count <= 0)
-    return result;
+    return false;
+
+  bool have_best = false;
+  SimpleOutcome best = (state->whose_turn == ColorWhite) ? SimpleOutcomeBlackWin : SimpleOutcomeWhiteWin;
+  MoveDesc chosen = moves[0];
 
   for (int idx = 0; idx < move_count && idx < MAX_LEGAL_MOVES; ++idx) {
     GameState next_state;
@@ -748,17 +741,22 @@ static BestMoveResult FindBestMove(const GameState *state, int depth_left) {
     next_state.ep_info = ComputeNextEnPassant(&state->board, &moves[idx]);
     const SimpleOutcome outcome = EvaluatePosition(&next_state, depth_left - 1);
 
-    if (!result.has_move || OutcomeBetter(outcome, result.outcome, state->whose_turn)) {
-      result.move = moves[idx];
-      result.outcome = outcome;
-      result.has_move = true;
+    if (!have_best || OutcomeBetter(outcome, best, state->whose_turn)) {
+      best = outcome;
+      chosen = moves[idx];
+      have_best = true;
+      if (OutcomeIsWinFor(outcome, state->whose_turn))
+        break;
     }
-
-    if (OutcomeIsWinFor(outcome, state->whose_turn))
-      break;
   }
 
-  return result;
+  if (!have_best)
+    return false;
+  if (best_move)
+    *best_move = chosen;
+  if (best_outcome)
+    *best_outcome = best;
+  return true;
 }
 #endif
 
@@ -827,6 +825,21 @@ int SimpleChess_EvaluateOutcome(const Chessboard *board,
 }
 
 #ifndef SIMPLE_CHESS_LIBRARY
+
+#ifdef __CPROVER__
+extern unsigned int nondet_uint(void);
+static unsigned int PickOpponentMoveIndex(unsigned int upper) {
+  unsigned int value = nondet_uint();
+  __CPROVER_assume(value < upper);
+  return value;
+}
+#else
+static unsigned int PickOpponentMoveIndex(unsigned int upper) {
+  (void)upper;
+  return 0U;
+}
+#endif
+
 int main(void) {
   GameState state;
   PutInitial(&state.board);
@@ -835,35 +848,58 @@ int main(void) {
   state.ep_info.row = 0;
   state.ep_info.col = 0;
 
-  SimpleOutcome final_outcome = SimpleOutcomeDraw;
+  const int hero_color = state.whose_turn;
 
-  for (int ply = 0; ply < MAX_MOVE_SEQ; ++ply) {
-    BestMoveResult best = FindBestMove(&state, MAX_SEARCH_DEPTH);
-    if (!best.has_move) {
-      if (Chess_KingInCheck(&state.board, state.whose_turn)) {
-        final_outcome = (state.whose_turn == ColorWhite) ? SimpleOutcomeBlackWin : SimpleOutcomeWhiteWin;
-      } else {
-        final_outcome = SimpleOutcomeDraw;
-      }
-      break;
-    }
-    if (OutcomeIsWinFor(best.outcome, state.whose_turn)) {
-      final_outcome = best.outcome;
-      break;
-    }
-    if (best.outcome == SimpleOutcomeDraw) {
-      final_outcome = SimpleOutcomeDraw;
+  for (int ply = 0; ply < MAX_SEARCH_DEPTH; ++ply) {
+    MoveDesc best_move;
+    SimpleOutcome best_outcome = SimpleOutcomeDraw;
+    const int hero_depth = MAX_SEARCH_DEPTH - ply;
+    bool has_move = FindBestMove(&state, hero_depth, &best_move, &best_outcome);
+    if (!has_move) {
+      const bool in_check = Chess_KingInCheck(&state.board, state.whose_turn);
+      __CPROVER_assert(!in_check || state.whose_turn != hero_color, "Hero must not face unavoidable checkmate");
       break;
     }
 
-    Chessboard next_board;
-    Chess_ApplyMove(&state.board, &next_board, &best.move);
-    state.ep_info = ComputeNextEnPassant(&state.board, &best.move);
-    state.board = next_board;
+    __CPROVER_assert(OutcomeIsWinFor(best_outcome, hero_color), "Hero move must preserve a forced win");
+
+    Chessboard after_hero;
+    Chess_ApplyMove(&state.board, &after_hero, &best_move);
+    EnPassantInfo hero_ep = ComputeNextEnPassant(&state.board, &best_move);
+    state.board = after_hero;
+    state.ep_info = hero_ep;
     state.whose_turn = 1 - state.whose_turn;
+
+    const EnPassantInfo *op_ep_ptr = state.ep_info.available ? &state.ep_info : NULL;
+    MoveDesc opponent_moves[MAX_LEGAL_MOVES];
+    const int opponent_count = Chess_GenerateLegalMoves(&state.board,
+                                                        state.whose_turn,
+                                                        state.ep_info.available,
+                                                        op_ep_ptr,
+                                                        opponent_moves,
+                                                        MAX_LEGAL_MOVES);
+    if (opponent_count <= 0) {
+      const bool in_check = Chess_KingInCheck(&state.board, state.whose_turn);
+      __CPROVER_assert(in_check, "Opponent stalemate encountered");
+      break;
+    }
+
+    const unsigned int choice = PickOpponentMoveIndex((unsigned int)opponent_count);
+    const MoveDesc opponent_move = opponent_moves[choice];
+    Chessboard after_opponent;
+    Chess_ApplyMove(&state.board, &after_opponent, &opponent_move);
+    EnPassantInfo opponent_ep = ComputeNextEnPassant(&state.board, &opponent_move);
+    state.board = after_opponent;
+    state.ep_info = opponent_ep;
+    state.whose_turn = 1 - state.whose_turn;
+
+    int remaining_depth = MAX_SEARCH_DEPTH - ply - 1;
+    if (remaining_depth < 0)
+      remaining_depth = 0;
+    SimpleOutcome continuation = EvaluatePosition(&state, remaining_depth);
+    __CPROVER_assert(OutcomeIsWinFor(continuation, hero_color), "Hero must retain forced win after opponent move");
   }
 
-  (void)final_outcome;
   return 0;
 }
 #endif
