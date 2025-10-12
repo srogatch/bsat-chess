@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 typedef struct
 {
@@ -8,6 +9,24 @@ typedef struct
   uint8_t col_ : 3;
   uint8_t active_ : 1;
 } Position;
+
+Position MakePos(const uint8_t row, const uint8_t col, const bool active)
+{
+  return Position{.row_ = row, .col_ = col, .active_ = active ? 1 : 0};
+}
+
+typedef struct
+{
+  uint16_t srcRow_ : 3;
+  uint16_t srcCol_ : 3;
+  uint16_t dstRow_ : 3;
+  uint16_t dstCol_ : 3;
+} Move;
+
+Move MakeMove(const uint16_t srcRow, const uint16_t srcCol, const uint16_t dstRow, const uint16_t dstCol)
+{
+  return Move{.srcRow_ = srcRow, .srcCol_ = srcCol, .dstRow_ = dstRow, .dstCol_ = dstCol};
+}
 
 typedef enum
 {
@@ -89,6 +108,9 @@ static const int8_t cRookDirs[4][2] = {
 };
 static const int8_t cBishopDirs[4][2] = {
   {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+};
+static const int8_t cKingDirs[8][2] = {
+  {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}, {1, 0}, {-1, 0}
 };
 
 bool IsOnBoad(int8_t row, int8_t col)
@@ -195,7 +217,95 @@ extern bool nondet_bool();
 // Play the game at |cgs|, as I am a deterministic player if |iamDeterm==true| or otherwise as non-deterministic.
 // If the previous move of the opponent was 2-cell pawn move, enPasse stores active_==true and the new coords of that pawn.
 // Returns +1 if I win, 0 if the game ends in a draw or stalemate, or -1 if I lose.
-int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse)
+int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *bestMove)
 {
-
+  int8_t bestOutcome = -2; // assume I lose unless found a better move
+  // First of all check if we need to hide from a check or retreat
+  const bool iamWhite = !cgs->blacksTurn_;
+  const int8_t myKingRow = iamWhite ? cgs->whiteKingRow_ : cgs->blackKingRow_;
+  const int8_t myKingCol = iamWhite ? cgs->whiteKingCol_ : cgs->blackKingCol_;
+  const CheckState kingCheck = GetCheckState(cgs, iamWhite);
+  // First of all consider king moves (takes or retreats), because they also work if kingCheck.mustRetreat_==true
+  for (int8_t iDir=0; iDir<8; iDir++)
+  {
+    const int8_t nextKingRow = myKingRow + cKingDirs[iDir][0];
+    const int8_t nextKingCol = myKingCol + cKingDirs[iDir][1];
+    if (!IsOnBoad(nextKingRow, nextKingCol))
+    {
+      continue;
+    }
+    const ChessPiece piece = GetPieceAt(cgs, nextKingRow, nextKingCol);
+    if (piece != NoPiece && iamWhite == IsWhitePiece(piece))
+    {
+      // My king can't move here because there's another piece of the same color.
+      continue;
+    }
+    // Check the vicinity of opponent's king
+    const int8_t oppKingRow = iamWhite ? cgs->blackKingRow_ : cgs->whiteKingRow_;
+    const int8_t oppKingCol = iamWhite ? cgs->blackKingCol_ : cgs->whiteKingCol_;
+    if (abs(nextKingRow - oppKingRow) <= 1 && abs(nextKingCol - oppKingCol) <= 1)
+    {
+      // My king can't move too close to the opponent's king
+      continue;
+    }
+    // Prepare to move, even if taking an opponent's piece, but verify that after that my king is not under a check
+    ChessGameState nextCgs = *cgs;
+    // After moving the king, we lose the possibility of castlings
+    if (iamWhite)
+    {
+      nextCgs.canWhite00_ = 0;
+      nextCgs.canWhite000_ = 0;
+      nextCgs.whiteKingRow_ = nextKingRow;
+      nextCgs.whiteKingCol_ = nextKingCol;
+    }
+    else
+    {
+      nextCgs.canBlack00_ = 0;
+      nextCgs.canBlack000_ = 0;
+      nextCgs.blackKingRow_ = nextKingRow;
+      nextCgs.blackKingCol_ = nextKingCol;
+    }
+    SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+    SetPieceAt(&nextCgs, nextKingRow, nextKingCol, iamWhite ? WhiteKing : BlackKing);
+    const CheckState nextCheck = GetCheckState(&nextCgs, iamWhite);
+    // If it's still a check, e.g. the cell is also attacked, or there was an opponent's piece protected by another piece
+    if (nextCheck.isCheck_)
+    {
+      continue;
+    }
+    // We've found a move for our king!
+    Move oppMove;
+    if (iamDeterm)
+    {
+      const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+      if (outcome > bestOutcome)
+      {
+        bestOutcome = outcome;
+        *bestMove = MakeMove(myKingRow, myKingCol, nextKingRow, nextKingCol);
+        if (bestOutcome >= 1)
+        {
+          return bestOutcome;
+        }
+      }
+    }
+    else
+    {
+      const bool choose = nondet_bool();
+      if (choose)
+      {
+        *bestMove = MakeMove(myKingRow, myKingCol, nextKingRow, nextKingCol);
+        return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+      }
+    }
+  }
+  if (kingCheck.mustRetreat_)
+  {
+    // No more moves available.
+    // TODO: return the best available game outcome
+  }
+  if (kingCheck.isCheck_)
+  {
+    // TODO: try to hide behind some piece of mine, or take the offending opponent's piece
+  }
+  // TODO: if a rook moves, wipe off the possibility of castling with that rook
 }
