@@ -19,6 +19,7 @@ typedef struct
   uint8_t ft_ : 2; // FigureTypes
 } FigurePos;
 
+#define MAX_MOVE_SEQ 256
 #define MAX_PLAYER_FIGURES 15
 #define MAX_PAWNS 8
 
@@ -58,10 +59,27 @@ typedef struct
 
 extern unsigned short nondet_ushort();
 
+Move NondetMove()
+{
+  Move ans;
+  uint16_t choice = nondet_ushort();
+  __CPROVER_assume(0 <= choice && choice < 8*8*8*8);
+  ans.srcRow_ = choice % 8;
+  choice /= 8;
+  ans.srcCol_ = choice % 8;
+  choice /= 8;
+  ans.dstRow_ = choice % 8;
+  choice /= 8;
+  ans.dstCol_ = choice % 8;
+  return ans;
+}
+
 int main()
 {
   ChessBoard board;
   PutInitial(&board);
-
+  // TODO: for each current player's move, determine whether this player's win is forced, and if no move forces a win, force stalemate.
+  // TODO: in a sequence of moves, in each turn the current player selects the best move, while the other player moves non-deterministically
+  // TODO: limit the horizon of the game to MAX_MOVE_SEQ moves
   return 0;
 }
