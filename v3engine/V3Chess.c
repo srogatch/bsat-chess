@@ -2,6 +2,13 @@
 #include <assert.h>
 #include <stdbool.h>
 
+typedef struct
+{
+  uint8_t row_ : 3;
+  uint8_t col_ : 3;
+  uint8_t active_ : 1;
+} Position;
+
 typedef enum
 {
   NoPiece = 0,
@@ -181,4 +188,14 @@ CheckState GetCheckState(const ChessGameState *cgs, bool whiteKing)
 {
   return IsAttacked(cgs, whiteKing ? cgs->whiteKingRow_ : cgs->blackKingRow_,
     whiteKing ? cgs->whiteKingCol_ : cgs->blackKingCol_, whiteKing);
+}
+
+extern bool nondet_bool();
+
+// Play the game at |cgs|, as I am a deterministic player if |iamDeterm==true| or otherwise as non-deterministic.
+// If the previous move of the opponent was 2-cell pawn move, enPasse stores active_==true and the new coords of that pawn.
+// Returns +1 if I win, 0 if the game ends in a draw or stalemate, or -1 if I lose.
+int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse)
+{
+
 }
