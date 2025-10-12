@@ -301,9 +301,243 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
   }
   if (kingCheck.mustRetreat_)
   {
-    // No more moves available.
-    // TODO: return the best available game outcome
+    // No more moves available. Return the best available game outcome.
     return bestOutcome;
+  }
+  if (!kingCheck.isCheck_) {
+    // Try the castlings
+    if (iamWhite) {
+      if (cgs->canWhite00_) {
+        bool clear = true;
+        for (int8_t col=5; col<=6; ++col)
+        {
+          const ChessPiece piece = GetPieceAt(cgs, 0, col);
+          if (piece != NoPiece)
+          {
+            clear = false;
+            break;
+          }
+          if (IsAttacked(cgs, 0, col, iamWhite).isCheck_)
+          {
+            clear = false;
+            break;
+          }
+        }
+        if (clear)
+        {
+          ChessGameState nextCgs = *cgs;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          nextCgs.canWhite00_ = 0;
+          nextCgs.canWhite000_ = 0;
+          // Remove king from the old position
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          // Remove rook from the old position
+          SetPieceAt(&nextCgs, 0, 7, NoPiece);
+          // Put king to the new position
+          SetPieceAt(&nextCgs, 0, 6, WhiteKing);
+          nextCgs.whiteKingRow_ = 0;
+          nextCgs.whiteKingCol_ = 6;
+          // Put rook to the new position
+          SetPieceAt(&nextCgs, 0, 5, WhiteRook);
+          Move oppMove;
+          if (iamDeterm)
+          {
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            if (outcome > bestOutcome)
+            {
+              bestOutcome = outcome;
+              *bestMove = MakeMove(myKingRow, myKingCol, 0, 6);
+              if (bestOutcome >= 1)
+              {
+                return bestOutcome;
+              }
+            }
+          }
+          else
+          {
+            const bool choose = nondet_bool();
+            if (choose)
+            {
+              *bestMove = MakeMove(myKingRow, myKingCol, 0, 6);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            }
+          }
+        }
+      }
+      if (cgs->canWhite000_)
+      {
+        bool clear = true;
+        for (int8_t col=1; col<=3; ++col)
+        {
+          const ChessPiece piece = GetPieceAt(cgs, 0, col);
+          if (piece != NoPiece)
+          {
+            clear = false;
+            break;
+          }
+          if (IsAttacked(cgs, 0, col, iamWhite).isCheck_)
+          {
+            clear = false;
+            break;
+          }
+        }
+        if (clear)
+        {
+          ChessGameState nextCgs = *cgs;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          nextCgs.canWhite00_ = 0;
+          nextCgs.canWhite000_ = 0;
+          // Remove king from the old position
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          // Remove rook from the old position
+          SetPieceAt(&nextCgs, 0, 0, NoPiece);
+          // Put king to the new position
+          SetPieceAt(&nextCgs, 0, 2, WhiteKing);
+          nextCgs.whiteKingRow_ = 0;
+          nextCgs.whiteKingCol_ = 2;
+          // Put rook to the new position
+          SetPieceAt(&nextCgs, 0, 3, WhiteRook);
+          Move oppMove;
+          if (iamDeterm)
+          {
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            if (outcome > bestOutcome)
+            {
+              bestOutcome = outcome;
+              *bestMove = MakeMove(myKingRow, myKingCol, 0, 2);
+              if (bestOutcome >= 1)
+              {
+                return bestOutcome;
+              }
+            }
+          }
+          else
+          {
+            const bool choose = nondet_bool();
+            if (choose)
+            {
+              *bestMove = MakeMove(myKingRow, myKingCol, 0, 2);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            }
+          }
+        }
+      }
+    } else {
+      if (cgs->canBlack00_) {
+        bool clear = true;
+        for (int8_t col=5; col<=6; ++col)
+        {
+          const ChessPiece piece = GetPieceAt(cgs, 7, col);
+          if (piece != NoPiece)
+          {
+            clear = false;
+            break;
+          }
+          if (IsAttacked(cgs, 7, col, iamWhite).isCheck_)
+          {
+            clear = false;
+            break;
+          }
+        }
+        if (clear)
+        {
+          ChessGameState nextCgs = *cgs;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          nextCgs.canBlack00_ = 0;
+          nextCgs.canBlack000_ = 0;
+          // Remove king from the old position
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          // Remove rook from the old position
+          SetPieceAt(&nextCgs, 7, 7, NoPiece);
+          // Put king to the new position
+          SetPieceAt(&nextCgs, 7, 6, BlackKing);
+          nextCgs.blackKingRow_ = 7;
+          nextCgs.blackKingCol_ = 6;
+          // Put rook to the new position
+          SetPieceAt(&nextCgs, 7, 5, BlackRook);
+          Move oppMove;
+          if (iamDeterm)
+          {
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            if (outcome > bestOutcome)
+            {
+              bestOutcome = outcome;
+              *bestMove = MakeMove(myKingRow, myKingCol, 7, 6);
+              if (bestOutcome >= 1)
+              {
+                return bestOutcome;
+              }
+            }
+          }
+          else
+          {
+            const bool choose = nondet_bool();
+            if (choose)
+            {
+              *bestMove = MakeMove(myKingRow, myKingCol, 7, 6);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            }
+          }
+        }
+      }
+      if (cgs->canBlack000_) {
+        bool clear = true;
+        for (int8_t col=1; col<=3; ++col)
+        {
+          const ChessPiece piece = GetPieceAt(cgs, 7, col);
+          if (piece != NoPiece)
+          {
+            clear = false;
+            break;
+          }
+          if (IsAttacked(cgs, 7, col, iamWhite).isCheck_)
+          {
+            clear = false;
+            break;
+          }
+        }
+        if (clear)
+        {
+          ChessGameState nextCgs = *cgs;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          nextCgs.canBlack00_ = 0;
+          nextCgs.canBlack000_ = 0;
+          // Remove king from the old position
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          // Remove rook from the old position
+          SetPieceAt(&nextCgs, 7, 0, NoPiece);
+          // Put king to the new position
+          SetPieceAt(&nextCgs, 7, 2, BlackKing);
+          nextCgs.blackKingRow_ = 7;
+          nextCgs.blackKingCol_ = 2;
+          // Put rook to the new position
+          SetPieceAt(&nextCgs, 7, 3, BlackRook);
+          Move oppMove;
+          if (iamDeterm)
+          {
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            if (outcome > bestOutcome)
+            {
+              bestOutcome = outcome;
+              *bestMove = MakeMove(myKingRow, myKingCol, 7, 2);
+              if (bestOutcome >= 1)
+              {
+                return bestOutcome;
+              }
+            }
+          }
+          else
+          {
+            const bool choose = nondet_bool();
+            if (choose)
+            {
+              *bestMove = MakeMove(myKingRow, myKingCol, 7, 2);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            }
+          }
+        }
+      }
+    }
   }
   if (kingCheck.isCheck_)
   {
