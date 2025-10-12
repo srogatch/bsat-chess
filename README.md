@@ -1,3 +1,5 @@
 ```bash
 cbmc --unwind 4097 --object-bits 14 --verbosity 8 model/SimpleChess.c
 ```
+
+Can you please come up with a simple chess engine for analysis with CBMC? Store the engine in file ChessEngine.c , and let it include file ChessState.h in which the chessboard, pawn en-passe state and who moves next (White or Black) is defined. Given the chess game state, for the current player please select the best move, assuming that in each turn the current player selects the best move, while the other player moves non-deterministically. Please, store each move up to the search depth as 12 bits: 3 bits for each of (srcRow, srcCol, dstRow, dstCol). This way you can generate non-deterministic uint16_t modulo (8*8*8*8). In each turn, you validate the current (deterministic for the current player or non-deterministic for the opponent) move whether it is a legal move, and if so, whether it ends the game. Please, keep the nested loops to a minimum so that the program is easily transformable by CBMC to a Boolean Formula.
