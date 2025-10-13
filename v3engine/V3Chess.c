@@ -1030,7 +1030,7 @@ int main() {
   ChessGameState cgs;
   InitSituation(&cgs);
   Move firstMove;
-  const int8_t whiteOutcome = Play(&cgs, true, MakePos(0, 0, false), &firstMove, 0);
+  const int8_t whiteOutcome = Play(&cgs, true, MakePos(0, 0, false), &firstMove, 1);
   __CPROVER_assert(whiteOutcome >= 0, "Finding a move such that whites don't lose");
   return 0;
 }
