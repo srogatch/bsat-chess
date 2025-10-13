@@ -737,7 +737,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             // Remove my pawn from the old position
             SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
             // Put my pawn to the new position
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, dc != 0);
             // Promoted piece selection doesn't influence when it serves as an obstacle to a check to me
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
