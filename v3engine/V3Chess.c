@@ -674,7 +674,12 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         }
         // Normal pawn moves front, and takes left and right; with promotions!
         for (int8_t dc=-1; dc<=1; dc++) {
-          const Position dstPos = MakePos(iamWhite ? srcRow+1 : srcRow-1, srcCol+dc, false);
+          const int8_t dstRow = iamWhite ? srcRow+1 : srcRow-1;
+          const int8_t dstCol = srcCol + dc;
+          if (!IsOnBoad(dstRow, dstCol)) {
+            continue;
+          }
+          const Position dstPos = MakePos(dstRow, dstCol, false);
           const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
           if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
           {
@@ -765,7 +770,12 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
         for (int8_t iDir=0; iDir<8; iDir++)
         {
-          const Position dstPos = MakePos(srcRow + cKnightDirs[iDir][0], srcCol + cKnightDirs[iDir][1], false);
+          const int8_t dstRow = srcRow + cKnightDirs[iDir][0];
+          const int8_t dstCol = srcCol + cKnightDirs[iDir][1]
+          if (!IsOnBoad(dstRow, dstCol)) {
+            continue;
+          }
+          const Position dstPos = MakePos(dstRow, dstCol, false);
           const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
           if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
           {
@@ -816,7 +826,12 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         {
           for (int8_t dist=1; dist<=7; dist++)
           {
-            const Position dstPos = MakePos(srcRow + dist * cBishopDirs[iDir][0], srcCol + dist * cBishopDirs[iDir][1], false);
+            const int8_t dstRow = srcRow + dist * cBishopDirs[iDir][0];
+            const int8_t dstCol = srcCol + dist * cBishopDirs[iDir][1];
+            if (!IsOnBoad(dstRow, dstCol)) {
+              break;
+            }
+            const Position dstPos = MakePos(dstRow, dstCol, false);
             const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
             if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
             {
@@ -889,7 +904,12 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         {
           for (int8_t dist=1; dist<=7; dist++)
           {
-            const Position dstPos = MakePos(srcRow + dist * cRookDirs[iDir][0], srcCol + dist * cRookDirs[iDir][1], false);
+            const int8_t dstRow = srcRow + dist * cRookDirs[iDir][0];
+            const int8_t dstCol = srcCol + dist * cRookDirs[iDir][1];
+            if (!IsOnBoad(dstRow, dstCol)) {
+              break;
+            }
+            const Position dstPos = MakePos(dstRow, dstCol, false);
             const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
             if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
             {
@@ -945,7 +965,12 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         {
           for (int8_t dist=1; dist<=7; dist++)
           {
-            const Position dstPos = MakePos(srcRow + dist * cQueenDirs[iDir][0], srcCol + dist * cQueenDirs[iDir][1], false);
+            const int8_t dstRow = srcRow + dist * cQueenDirs[iDir][0];
+            const int8_t dstCol = srcCol + dist * cQueenDirs[iDir][1];
+            if (!IsOnBoad(dstRow, dstCol)) {
+              break;
+            }
+            const Position dstPos = MakePos(dstRow, dstCol, false);
             const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
             if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
             {
