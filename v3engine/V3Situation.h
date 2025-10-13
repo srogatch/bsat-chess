@@ -9,36 +9,36 @@ void InitSituation(ChessGameState *cgs)
   {
     for (int8_t j=0; j<8; j++)
     {
-      SetPieceAt(cgs, i, j, NoPiece);
+      SetPieceAt(cgs, i, j, NoPiece, false);
     }
   }
   for (int8_t j=0; j<8; j++)
   {
-    SetPieceAt(cgs, 1, j, WhitePawn);
+    SetPieceAt(cgs, 1, j, WhitePawn, false);
   }
   for (int8_t j=0; j<8; j++)
   {
-    SetPieceAt(cgs, 6, j, BlackPawn);
+    SetPieceAt(cgs, 6, j, BlackPawn, false);
   }
-  SetPieceAt(cgs, 0, 0, WhiteRook);
-  SetPieceAt(cgs, 0, 1, WhiteKnight);
-  SetPieceAt(cgs, 0, 2, WhiteBishop);
-  SetPieceAt(cgs, 0, 3, WhiteQueen);
-  SetPieceAt(cgs, 0, 4, WhiteKing);
+  SetPieceAt(cgs, 0, 0, WhiteRook, false);
+  SetPieceAt(cgs, 0, 1, WhiteKnight, false);
+  SetPieceAt(cgs, 0, 2, WhiteBishop, false);
+  SetPieceAt(cgs, 0, 3, WhiteQueen, false);
+  SetPieceAt(cgs, 0, 4, WhiteKing, false);
   cgs->whiteKingRow_ = 0;
   cgs->whiteKingCol_ = 4;
-  SetPieceAt(cgs, 0, 5, WhiteBishop);
-  SetPieceAt(cgs, 0, 6, WhiteKnight);
-  SetPieceAt(cgs, 0, 7, WhiteRook);
+  SetPieceAt(cgs, 0, 5, WhiteBishop, false);
+  SetPieceAt(cgs, 0, 6, WhiteKnight, false);
+  SetPieceAt(cgs, 0, 7, WhiteRook, false);
 
-  SetPieceAt(cgs, 7, 0, BlackRook);
-  SetPieceAt(cgs, 7, 1, BlackKnight);
-  SetPieceAt(cgs, 7, 2, BlackBishop);
-  SetPieceAt(cgs, 7, 3, BlackQueen);
-  SetPieceAt(cgs, 7, 4, BlackKing);
+  SetPieceAt(cgs, 7, 0, BlackRook, false);
+  SetPieceAt(cgs, 7, 1, BlackKnight, false);
+  SetPieceAt(cgs, 7, 2, BlackBishop, false);
+  SetPieceAt(cgs, 7, 3, BlackQueen, false);
+  SetPieceAt(cgs, 7, 4, BlackKing, false);
   cgs->blackKingRow_ = 7;
   cgs->blackKingCol_ = 4;
-  SetPieceAt(cgs, 7, 5, BlackBishop);
-  SetPieceAt(cgs, 7, 6, BlackKnight);
-  SetPieceAt(cgs, 7, 7, BlackRook);
+  SetPieceAt(cgs, 7, 5, BlackBishop, false);
+  SetPieceAt(cgs, 7, 6, BlackKnight, false);
+  SetPieceAt(cgs, 7, 7, BlackRook, false);
 }

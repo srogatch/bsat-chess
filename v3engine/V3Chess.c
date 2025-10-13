@@ -90,10 +90,47 @@ typedef struct
 ChessPiece GetPieceAt(const ChessGameState *cgs, const uint8_t row, const uint8_t col) {
   return (cgs->board_[row][col/2] >> (4 * (col%2))) & 0xF;
 }
-void SetPieceAt(ChessGameState *cgs, const uint8_t row, const uint8_t col, const ChessPiece piece)
+void SetPieceAt(ChessGameState *cgs, const uint8_t row, const uint8_t col, const ChessPiece piece, bool updateCastlings)
 {
   cgs->board_[row][col/2] &= (0xF << (4 * (1 - col%2)));
   cgs->board_[row][col/2] |= (piece << (4 * (col % 2)));
+  if (updateCastlings)
+  {
+    if (row == 0 && col == 0)
+    {
+      cgs->canWhite000_ = 0;
+    }
+    else if (row == 0 && col == 7)
+    {
+      cgs->canWhite00_ = 0;
+    }
+    else if (row == 7 && col == 0)
+    {
+      cgs->canBlack000_ = 0;
+    }
+    else if (row == 7 && col == 7)
+    {
+      cgs->canBlack00_ = 0;
+    }
+  }
+}
+
+uint8_t SaveCastlings(const ChessGameState* cgs)
+{
+  const uint8_t ans =
+    (cgs->canWhite00_ ? 1 : 0)
+  | (cgs->canWhite000_ ? 2 : 0)
+  | (cgs->canBlack00_ ? 4 : 0)
+  | (cgs->canBlack000_ ? 8 : 0);
+  return ans;
+}
+
+void RestoreCastlings(ChessGameState *nextCgs, const uint8_t canCastle)
+{
+  nextCgs->canWhite00_ = (canCastle & 1) ? 1 : 0;
+  nextCgs->canWhite000_ = (canCastle & 2) ? 1 : 0;
+  nextCgs->canBlack00_ = (canCastle & 4) ? 1 : 0;
+  nextCgs->canBlack000_ = (canCastle & 8) ? 1 : 0;
 }
 
 typedef struct
@@ -289,8 +326,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
       nextCgs.blackKingRow_ = nextKingRow;
       nextCgs.blackKingCol_ = nextKingCol;
     }
-    SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
-    SetPieceAt(&nextCgs, nextKingRow, nextKingCol, iamWhite ? WhiteKing : BlackKing);
+    SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece, false);
+    SetPieceAt(&nextCgs, nextKingRow, nextKingCol, iamWhite ? WhiteKing : BlackKing, true);
     const CheckState nextCheck = GetCheckState(&nextCgs, iamWhite);
     // If it's still a check, e.g. the cell is also attacked, or there was an opponent's piece protected by another piece
     if (nextCheck.isCheck_)
@@ -355,15 +392,15 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
           nextCgs.canWhite00_ = 0;
           nextCgs.canWhite000_ = 0;
           // Remove king from the old position
-          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece, false);
           // Remove rook from the old position
-          SetPieceAt(&nextCgs, 0, 7, NoPiece);
+          SetPieceAt(&nextCgs, 0, 7, NoPiece, false);
           // Put king to the new position
-          SetPieceAt(&nextCgs, 0, 6, WhiteKing);
+          SetPieceAt(&nextCgs, 0, 6, WhiteKing, false);
           nextCgs.whiteKingRow_ = 0;
           nextCgs.whiteKingCol_ = 6;
           // Put rook to the new position
-          SetPieceAt(&nextCgs, 0, 5, WhiteRook);
+          SetPieceAt(&nextCgs, 0, 5, WhiteRook, false);
           Move oppMove;
           if (iamDeterm)
           {
@@ -414,15 +451,15 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
           nextCgs.canWhite00_ = 0;
           nextCgs.canWhite000_ = 0;
           // Remove king from the old position
-          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece, false);
           // Remove rook from the old position
-          SetPieceAt(&nextCgs, 0, 0, NoPiece);
+          SetPieceAt(&nextCgs, 0, 0, NoPiece, false);
           // Put king to the new position
-          SetPieceAt(&nextCgs, 0, 2, WhiteKing);
+          SetPieceAt(&nextCgs, 0, 2, WhiteKing, false);
           nextCgs.whiteKingRow_ = 0;
           nextCgs.whiteKingCol_ = 2;
           // Put rook to the new position
-          SetPieceAt(&nextCgs, 0, 3, WhiteRook);
+          SetPieceAt(&nextCgs, 0, 3, WhiteRook, false);
           Move oppMove;
           if (iamDeterm)
           {
@@ -473,15 +510,15 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
           nextCgs.canBlack00_ = 0;
           nextCgs.canBlack000_ = 0;
           // Remove king from the old position
-          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece, false);
           // Remove rook from the old position
-          SetPieceAt(&nextCgs, 7, 7, NoPiece);
+          SetPieceAt(&nextCgs, 7, 7, NoPiece, false);
           // Put king to the new position
-          SetPieceAt(&nextCgs, 7, 6, BlackKing);
+          SetPieceAt(&nextCgs, 7, 6, BlackKing, false);
           nextCgs.blackKingRow_ = 7;
           nextCgs.blackKingCol_ = 6;
           // Put rook to the new position
-          SetPieceAt(&nextCgs, 7, 5, BlackRook);
+          SetPieceAt(&nextCgs, 7, 5, BlackRook, false);
           Move oppMove;
           if (iamDeterm)
           {
@@ -531,15 +568,15 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
           nextCgs.canBlack00_ = 0;
           nextCgs.canBlack000_ = 0;
           // Remove king from the old position
-          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece);
+          SetPieceAt(&nextCgs, myKingRow, myKingCol, NoPiece, false);
           // Remove rook from the old position
-          SetPieceAt(&nextCgs, 7, 0, NoPiece);
+          SetPieceAt(&nextCgs, 7, 0, NoPiece, false);
           // Put king to the new position
-          SetPieceAt(&nextCgs, 7, 2, BlackKing);
+          SetPieceAt(&nextCgs, 7, 2, BlackKing, false);
           nextCgs.blackKingRow_ = 7;
           nextCgs.blackKingCol_ = 2;
           // Put rook to the new position
-          SetPieceAt(&nextCgs, 7, 3, BlackRook);
+          SetPieceAt(&nextCgs, 7, 3, BlackRook, false);
           Move oppMove;
           if (iamDeterm)
           {
@@ -568,9 +605,9 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
       }
     }
   }
-  // TODO: if my king is at a check, try to hide behind some piece of mine, or take the offending opponent's piece
-  // TODO: try to move my figures, verifying that after that move my king is not at a check
-  // TODO: if a rook moves, wipe off the possibility of castling with that rook
+  // If my king is at a check, try to hide behind some piece of mine, or take the offending opponent's piece
+  // Try to move my figures, verifying that after that move my king is not at a check
+  // If a rook moves or is taken, wipe off the possibility of castling with that rook
   for (int8_t srcRow=0; srcRow<8; ++srcRow)
   {
     for (int8_t srcCol=0; srcCol<8; ++srcCol)
@@ -597,9 +634,9 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             ChessGameState nextCgs = *cgs;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove the pawn from the previous position
-            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
             // Put the pawn to the new position
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
               Move oppMove;
@@ -639,12 +676,12 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             ChessGameState nextCgs = *cgs;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove my pawn from the previous position
-            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
             // Remove opponents pawn that we take en-passe
-            SetPieceAt(&nextCgs, enPasse.row_, enPasse.col_, NoPiece);
+            SetPieceAt(&nextCgs, enPasse.row_, enPasse.col_, NoPiece, false);
             // Put my pawn to the new position
             Position dstPos = MakePos(iamWhite ? 5 : 2, srcCol + (takeLeft ? -1 : +1), false);
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
             Move oppMove;
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
@@ -693,9 +730,9 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             ChessGameState nextCgs = *cgs;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove my pawn from the old position
-            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
             // Put my pawn to the new position
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
             // Promoted piece selection doesn't influence when it serves as an obstacle to a check to me
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
@@ -705,7 +742,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
                 for (int8_t iPromo=0; iPromo<4; iPromo++)
                 {
                   const ChessPiece promotion = pPromos[iPromo];
-                  SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, promotion);
+                  SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, promotion, true);
                   Move oppMove;
                   if (iamDeterm)
                   {
@@ -770,7 +807,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         ChessGameState nextCgs = *cgs;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this knight from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+        const uint8_t canCastle = SaveCastlings(&nextCgs);
         for (int8_t iDir=0; iDir<8; iDir++)
         {
           const int8_t dstRow = srcRow + cKnightDirs[iDir][0];
@@ -785,7 +823,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             // My another piece prevents from moving there
             continue;
           }
-          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
           if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
           {
             Move oppMove;
@@ -814,7 +852,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             }
           }
           // epilogue - restore the aim piece that was there
-          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+          RestoreCastlings(&nextCgs, canCastle);
         }
         break;
       }
@@ -824,7 +863,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         ChessGameState nextCgs = *cgs;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this bishop from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+        const uint8_t canCastle = SaveCastlings(&nextCgs);
         for (int8_t iDir=0; iDir<4; iDir++)
         {
           for (int8_t dist=1; dist<=7; dist++)
@@ -841,7 +881,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
               // My other piece is an obstacle to further moving in this direction
               break;
             }
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
               Move oppMove;
@@ -870,7 +910,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
               }
             }
             // epilogue - restore the aim piece that was there
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+            RestoreCastlings(&nextCgs, canCastle);
             if (aimPiece != NoPiece)
             {
               break;
@@ -884,25 +925,9 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
       {
         ChessGameState nextCgs = *cgs;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-        // Remove this rook from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
-        // TODO: forbid castling with this rook
-        if (srcRow == 0 && srcCol == 0)
-        {
-          nextCgs.canWhite000_ = 0;
-        }
-        else if (srcRow == 0 && srcCol == 7)
-        {
-          nextCgs.canWhite00_ = 0;
-        }
-        else if (srcRow == 7 && srcCol == 0)
-        {
-          nextCgs.canBlack000_ = 0;
-        }
-        else if (srcRow == 7 && srcCol == 7)
-        {
-          nextCgs.canBlack00_ = 0;
-        }
+        // Remove this rook from the old position, forbid castling with this rook.
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, true);
+        uint8_t canCastle = SaveCastlings(&nextCgs);
         for (int8_t iDir=0; iDir<4; iDir++)
         {
           for (int8_t dist=1; dist<=7; dist++)
@@ -919,7 +944,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
               // My other piece is an obstacle to further moving in this direction
               break;
             }
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
               Move oppMove;
@@ -948,7 +973,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
               }
             }
             // epilogue - restore the aim piece that was there
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+            RestoreCastlings(&nextCgs, canCastle);
             if (aimPiece != NoPiece)
             {
               break;
@@ -963,7 +989,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         ChessGameState nextCgs = *cgs;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this queen from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+        const uint8_t canCastle = SaveCastlings(&nextCgs);
         for (int8_t iDir=0; iDir<8; iDir++)
         {
           for (int8_t dist=1; dist<=7; dist++)
@@ -980,7 +1007,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
               // My other piece is an obstacle to further moving in this direction
               break;
             }
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
               Move oppMove;
@@ -1009,7 +1036,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
               }
             }
             // epilogue - restore the aim piece that was there
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+            RestoreCastlings(&nextCgs, canCastle);
             if (aimPiece != NoPiece)
             {
               break;
