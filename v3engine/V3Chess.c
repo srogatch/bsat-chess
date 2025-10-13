@@ -587,7 +587,8 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         if (iamWhite && srcRow == 1 || !iamWhite && srcRow == 6)
         {
           const ChessPiece midPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 1 : -1), srcCol);
-          if (midPiece == NoPiece)
+          const ChessPiece finPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 2 : -2), srcCol);
+          if (midPiece == NoPiece && finPiece == NoPiece)
           {
             // The pawn can move 2 cells front, with en-passe option for the opponent
             const Position dstPos = MakePos(iamWhite ? 3 : 4, srcCol, true);
