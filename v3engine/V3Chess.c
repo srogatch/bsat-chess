@@ -23,11 +23,12 @@ typedef struct
   uint16_t srcCol_ : 3;
   uint16_t dstRow_ : 3;
   uint16_t dstCol_ : 3;
+  uint16_t iPromo_ : 2; // promotion index 0..3
 } Move;
 
-Move MakeMove(const uint16_t srcRow, const uint16_t srcCol, const uint16_t dstRow, const uint16_t dstCol)
+Move MakeMove(const uint16_t srcRow, const uint16_t srcCol, const uint16_t dstRow, const uint16_t dstCol, const uint16_t iPromo=0)
 {
-  return Move{.srcRow_ = srcRow, .srcCol_ = srcCol, .dstRow_ = dstRow, .dstCol_ = dstCol};
+  return Move{.srcRow_ = srcRow, .srcCol_ = srcCol, .dstRow_ = dstRow, .dstCol_ = dstCol, .iPromo_ = iPromo};
 }
 
 typedef enum
@@ -114,6 +115,8 @@ static const int8_t cBishopDirs[4][2] = {
 static const int8_t cKingDirs[8][2] = {
   {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}, {1, 0}, {-1, 0}
 };
+static const int8_t cWhitePromos[4] = {WhiteKnight, WhiteBishop, WhiteRook, WhiteQueen};
+static const int8_t cBlackPromos[4] = {BlackKnight, BlackBishop, BlackRook, BlackQueen};
 
 bool IsOnBoad(int8_t row, int8_t col)
 {
@@ -219,7 +222,7 @@ extern bool nondet_bool();
 // Play the game at |cgs|, as I am a deterministic player if |iamDeterm==true| or otherwise as non-deterministic.
 // If the previous move of the opponent was 2-cell pawn move, enPasse stores active_==true and the new coords of that pawn.
 // Returns +1 if I win, 0 if the game ends in a draw or stalemate, or -1 if I lose.
-int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *bestMove, const int depth)
+int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *bestMove, const int depth)
 {
   // TODO: instead, check whether we are in a terminal state where no player is able to win
   if (depth >= MAX_SEARCH_DEPTH)
@@ -658,7 +661,88 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
             }
           }
         }
-        // TODO: normal pawn moves front, and takes left and right
+        // Normal pawn moves front, and takes left and right; with promotions!
+        for (int8_t dc=-1; dc<=1; dc++) {
+          const Position dstPos = MakePos(iamWhite ? srcRow+1 : srcRow-1, srcCol+dc, false);
+          const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
+          if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+          {
+            // My other piece prevents this my pawn from moving there
+            continue;
+          }
+          if ( (dc == 0 && aimPiece == NoPiece) || (dc != 0 && IsWhitePiece(aimPiece) != iamWhite) ) {
+            ChessGameState nextCgs = *cgs;
+            nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+            // Remove my pawn from the old position
+            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+            // Put my pawn to the new position
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            // Promoted piece selection doesn't influence when it serves as an obstacle to a check to me
+            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+            {
+              if (dstPos.row_ == 0 || dstPos.row_ == 7) {
+                // Try all kinds of promotions
+                const int8_t *pPromos = (iamWhite ? cWhitePromos : cBlackPromos);
+                for (int8_t iPromo=0; iPromo<4; iPromo++)
+                {
+                  const ChessPiece promotion = pPromos[iPromo];
+                  SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, promotion);
+                  Move oppMove;
+                  if (iamDeterm)
+                  {
+                    const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                    if (outcome > bestOutcome)
+                    {
+                      bestOutcome = outcome;
+                      *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
+                      if (bestOutcome >= 1)
+                      {
+                        return bestOutcome;
+                      }
+                    }
+                  }
+                  else
+                  {
+                    const bool choose = nondet_bool();
+                    *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
+                    nondetHadMove = true;
+                    if (choose)
+                    {
+                      return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                    }
+                  }
+                }
+              }
+              else
+              {
+                Move oppMove;
+                if (iamDeterm)
+                {
+                  const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                  if (outcome > bestOutcome)
+                  {
+                    bestOutcome = outcome;
+                    *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                    if (bestOutcome >= 1)
+                    {
+                      return bestOutcome;
+                    }
+                  }
+                }
+                else
+                {
+                  const bool choose = nondet_bool();
+                  *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                  nondetHadMove = true;
+                  if (choose)
+                  {
+                    return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                  }
+                }
+              }
+            }
+          }
+        }
         break;
       }
       case WhiteKnight:
