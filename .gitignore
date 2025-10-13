@@ -1,7 +1,8 @@
-/model/*.o
 /.venv/
 /build/
 __pycache__/
 *.pyc
 /datasets/club_games_data.csv
-/ChessModel
+/old/model/*.o
+/old/build/
+/old/ChessModel
