@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#define MAX_SEARCH_DEPTH 64
+
 typedef struct
 {
   uint8_t row_ : 3;
@@ -217,8 +219,13 @@ extern bool nondet_bool();
 // Play the game at |cgs|, as I am a deterministic player if |iamDeterm==true| or otherwise as non-deterministic.
 // If the previous move of the opponent was 2-cell pawn move, enPasse stores active_==true and the new coords of that pawn.
 // Returns +1 if I win, 0 if the game ends in a draw or stalemate, or -1 if I lose.
-int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *bestMove)
+int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *bestMove, const int depth)
 {
+  // TODO: instead, check whether we are in a terminal state where no player is able to win
+  if (depth >= MAX_SEARCH_DEPTH)
+  {
+    return 0; // Draw
+  }
   bool nondetHadMove = false;
   int8_t bestOutcome = -2; // assume I lose unless found a better move
   // First of all check if we need to hide from a check or retreat
@@ -279,7 +286,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
     Move oppMove;
     if (iamDeterm)
     {
-      const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+      const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
       if (outcome > bestOutcome)
       {
         bestOutcome = outcome;
@@ -297,7 +304,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
       nondetHadMove = true;
       if (choose)
       {
-        return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+        return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
       }
     }
   }
@@ -344,7 +351,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           Move oppMove;
           if (iamDeterm)
           {
-            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             if (outcome > bestOutcome)
             {
               bestOutcome = outcome;
@@ -362,7 +369,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
             nondetHadMove = true;
             if (choose)
             {
-              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             }
           }
         }
@@ -403,7 +410,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           Move oppMove;
           if (iamDeterm)
           {
-            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             if (outcome > bestOutcome)
             {
               bestOutcome = outcome;
@@ -421,7 +428,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
             nondetHadMove = true;
             if (choose)
             {
-              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             }
           }
         }
@@ -462,7 +469,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           Move oppMove;
           if (iamDeterm)
           {
-            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             if (outcome > bestOutcome)
             {
               bestOutcome = outcome;
@@ -480,7 +487,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
             nondetHadMove = true;
             if (choose)
             {
-              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             }
           }
         }
@@ -520,7 +527,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
           Move oppMove;
           if (iamDeterm)
           {
-            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+            const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             if (outcome > bestOutcome)
             {
               bestOutcome = outcome;
@@ -538,7 +545,7 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
             nondetHadMove = true;
             if (choose)
             {
-              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove);
+              return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
             }
           }
         }
@@ -548,6 +555,137 @@ int8_t Play(ChessGameState *cgs, bool iamDeterm, const Position enPasse, Move *b
   // TODO: if my king is at a check, try to hide behind some piece of mine, or take the offending opponent's piece
   // TODO: try to move my figures, verifying that after that move my king is not at a check
   // TODO: if a rook moves, wipe off the possibility of castling with that rook
+  for (int8_t srcRow=0; srcRow<8; ++srcRow)
+  {
+    for (int8_t srcCol=0; srcCol<8; ++srcCol)
+    {
+      const ChessPiece piece = GetPieceAt(cgs, srcRow, srcCol);
+      if (piece == NoPiece || IsWhitePiece(piece) != iamWhite)
+      {
+        // No piece or not my piece in this cell
+        continue;
+      }
+      switch (piece)
+      {
+      case WhitePawn:
+      case BlackPawn:
+      {
+        if (iamWhite && srcRow == 1 || !iamWhite && srcRow == 6)
+        {
+          const ChessPiece midPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 1 : -1), srcCol);
+          if (midPiece == NoPiece)
+          {
+            // The pawn can move 2 cells front, with en-passe option for the opponent
+            const Position dstPos = MakePos(iamWhite ? 3 : 4, srcCol, true);
+            ChessGameState nextCgs = *cgs;
+            nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+            // Remove the pawn from the previous position
+            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+            // Put the pawn to the new position
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+            {
+              Move oppMove;
+              if (iamDeterm)
+              {
+                const int8_t outcome = -Play(&nextCgs, !iamDeterm, dstPos, &oppMove, depth + 1);
+                if (outcome > bestOutcome)
+                {
+                  bestOutcome = outcome;
+                  *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                  if (bestOutcome >= 1)
+                  {
+                    return bestOutcome;
+                  }
+                }
+              }
+              else
+              {
+                const bool choose = nondet_bool();
+                *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                nondetHadMove = true;
+                if (choose)
+                {
+                  return -Play(&nextCgs, !iamDeterm, dstPos, &oppMove, depth + 1);
+                }
+              }
+            }
+          }
+        }
+        // Don't forget abot the en-passe taking of the opponent's pawn
+        if (enPasse.active_)
+        {
+          const bool takeLeft = (enPasse.col_ == srcCol-1 && enPasse.row_ == srcRow);
+          const bool takeRight = (enPasse.col_ == srcCol+1 && enPasse.row_ == srcRow);
+          if (takeLeft || takeRight)
+          {
+            ChessGameState nextCgs = *cgs;
+            nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+            // Remove my pawn from the previous position
+            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+            // Remove opponents pawn that we take en-passe
+            SetPieceAt(&nextCgs, enPasse.row_, enPasse.col_, NoPiece);
+            // Put my pawn to the new position
+            Position dstPos = MakePos(iamWhite ? 5 : 2, srcCol + (takeLeft ? -1 : +1), false);
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            Move oppMove;
+            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+            {
+              Move oppMove;
+              if (iamDeterm)
+              {
+                const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                if (outcome > bestOutcome)
+                {
+                  bestOutcome = outcome;
+                  *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                  if (bestOutcome >= 1)
+                  {
+                    return bestOutcome;
+                  }
+                }
+              }
+              else
+              {
+                const bool choose = nondet_bool();
+                *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                nondetHadMove = true;
+                if (choose)
+                {
+                  return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                }
+              }
+            }
+          }
+        }
+        // TODO: normal pawn moves front, and takes left and right
+        break;
+      }
+      case WhiteKnight:
+      case BlackKnight:
+      {
+        break;
+      }
+      case WhiteBishop:
+      case BlackBishop:
+      {
+        break;
+      }
+      case WhiteRook:
+      case BlackRook:
+      {
+        break;
+      }
+      case WhiteQueen:
+      case BlackQueen:
+      {
+        break;
+      }
+      default:
+        assert(piece == WhiteKing || piece == BlackKing);
+      }
+    }
+  }
   if (bestOutcome == -2) // No moves detected
   {
     if (iamDeterm)
