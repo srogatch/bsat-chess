@@ -1016,3 +1016,10 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
   }
   return bestOutcome;
 }
+
+#include "V3Situation.h"
+
+int main() {
+
+  return 0;
+}
