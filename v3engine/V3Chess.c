@@ -364,6 +364,11 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
   if (kingCheck.mustRetreat_)
   {
     // No more moves available. Return the best available game outcome.
+    if (bestOutcome == -2)
+    {
+      *bestMove = MakeMove(0, 0, 0, 0);
+      return -1;
+    }
     return bestOutcome;
   }
   if (!kingCheck.isCheck_) {
