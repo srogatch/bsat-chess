@@ -1020,6 +1020,10 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
 #include "V3Situation.h"
 
 int main() {
-
+  ChessGameState cgs;
+  InitSituation(&cgs);
+  Move firstMove;
+  const int8_t whiteOutcome = Play(&cgs, true, MakePos(0, 0, false), &firstMove, 0);
+  __CPROVER_assert(whiteOutcome >= 0, "Finding a move such that whites don't lose");
   return 0;
 }
