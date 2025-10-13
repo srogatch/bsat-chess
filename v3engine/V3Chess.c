@@ -443,7 +443,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             clear = false;
             break;
           }
-          if (IsAttacked(cgs, 0, col, iamWhite).isCheck_)
+          if (col >= 2 && IsAttacked(cgs, 0, col, iamWhite).isCheck_)
           {
             clear = false;
             break;
@@ -560,7 +560,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             clear = false;
             break;
           }
-          if (IsAttacked(cgs, 7, col, iamWhite).isCheck_)
+          if (col >= 2 && IsAttacked(cgs, 7, col, iamWhite).isCheck_)
           {
             clear = false;
             break;
