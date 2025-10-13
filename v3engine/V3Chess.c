@@ -14,7 +14,8 @@ typedef struct
 
 Position MakePos(const uint8_t row, const uint8_t col, const bool active)
 {
-  return Position{.row_ = row, .col_ = col, .active_ = active ? 1 : 0};
+  Position ans = {.row_ = row, .col_ = col, .active_ = active ? 1 : 0};
+  return ans;
 }
 
 typedef struct
@@ -26,9 +27,15 @@ typedef struct
   uint16_t iPromo_ : 2; // promotion index 0..3
 } Move;
 
-Move MakeMove(const uint16_t srcRow, const uint16_t srcCol, const uint16_t dstRow, const uint16_t dstCol, const uint16_t iPromo=0)
+Move MakeMovePromo(const uint16_t srcRow, const uint16_t srcCol, const uint16_t dstRow, const uint16_t dstCol, const uint16_t iPromo)
 {
-  return Move{.srcRow_ = srcRow, .srcCol_ = srcCol, .dstRow_ = dstRow, .dstCol_ = dstCol, .iPromo_ = iPromo};
+  Move ans = {.srcRow_ = srcRow, .srcCol_ = srcCol, .dstRow_ = dstRow, .dstCol_ = dstCol, .iPromo_ = iPromo};
+  return ans;
+}
+
+Move MakeMove(const uint16_t srcRow, const uint16_t srcCol, const uint16_t dstRow, const uint16_t dstCol)
+{
+  return MakeMovePromo(srcRow, srcCol, dstRow, dstCol, 0);
 }
 
 typedef enum
@@ -99,7 +106,7 @@ typedef struct
 } CheckState;
 
 CheckState MakeCheckState(const bool isCheck, const bool mustRetreat) {
-  CheckState ans{.isCheck_ = isCheck ? 1 : 0, .mustRetreat_ = mustRetreat ? 1 : 0};
+  CheckState ans = {.isCheck_ = isCheck ? 1 : 0, .mustRetreat_ = mustRetreat ? 1 : 0};
   return ans;
 }
 
@@ -698,7 +705,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
                     if (outcome > bestOutcome)
                     {
                       bestOutcome = outcome;
-                      *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
+                      *bestMove = MakeMovePromo(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
                       if (bestOutcome >= 1)
                       {
                         return bestOutcome;
@@ -708,7 +715,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
                   else
                   {
                     const bool choose = nondet_bool();
-                    *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
+                    *bestMove = MakeMovePromo(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
                     nondetHadMove = true;
                     if (choose)
                     {
