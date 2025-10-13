@@ -25,6 +25,8 @@ void InitSituation(ChessGameState *cgs)
   SetPieceAt(cgs, 0, 2, WhiteBishop);
   SetPieceAt(cgs, 0, 3, WhiteQueen);
   SetPieceAt(cgs, 0, 4, WhiteKing);
+  cgs->whiteKingRow_ = 0;
+  cgs->whiteKingCol_ = 4;
   SetPieceAt(cgs, 0, 5, WhiteBishop);
   SetPieceAt(cgs, 0, 6, WhiteKnight);
   SetPieceAt(cgs, 0, 7, WhiteRook);
@@ -34,6 +36,8 @@ void InitSituation(ChessGameState *cgs)
   SetPieceAt(cgs, 7, 2, BlackBishop);
   SetPieceAt(cgs, 7, 3, BlackQueen);
   SetPieceAt(cgs, 7, 4, BlackKing);
+  cgs->blackKingRow_ = 7;
+  cgs->blackKingCol_ = 4;
   SetPieceAt(cgs, 7, 5, BlackBishop);
   SetPieceAt(cgs, 7, 6, BlackKnight);
   SetPieceAt(cgs, 7, 7, BlackRook);
