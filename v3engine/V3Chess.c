@@ -56,6 +56,7 @@ bool IsBlackPiece(const ChessPiece piece) {
   return piece > 0 && (piece % 2 == 0);
 }
 
+// TODO: set can-castlings to 1 when initializing to the start-game position
 typedef struct
 {
   uint8_t board_[8][4];
@@ -113,6 +114,9 @@ static const int8_t cBishopDirs[4][2] = {
   {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
 };
 static const int8_t cKingDirs[8][2] = {
+  {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}, {1, 0}, {-1, 0}
+};
+static const int8_t cQueenDirs[8][2] = {
   {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}, {1, 0}, {-1, 0}
 };
 static const int8_t cWhitePromos[4] = {WhiteKnight, WhiteBishop, WhiteRook, WhiteQueen};
@@ -853,11 +857,130 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
       case WhiteRook:
       case BlackRook:
       {
+        ChessGameState nextCgs = *cgs;
+        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+        // Remove this rook from the old position
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        // TODO: forbid castling with this rook
+        if (srcRow == 0 && srcCol == 0)
+        {
+          nextCgs.canWhite000_ = 0;
+        }
+        else if (srcRow == 0 && srcCol == 7)
+        {
+          nextCgs.canWhite00_ = 0;
+        }
+        else if (srcRow == 7 && srcCol == 0)
+        {
+          nextCgs.canBlack000_ = 0;
+        }
+        else if (srcRow == 7 && srcCol == 7)
+        {
+          nextCgs.canBlack00_ = 0;
+        }
+        for (int8_t iDir=0; iDir<4; iDir++)
+        {
+          for (int8_t dist=1; dist<=7; dist++)
+          {
+            const Position dstPos = MakePos(srcRow + dist * cRookDirs[iDir][0], srcCol + dist * cRookDirs[iDir][1], false);
+            const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
+            if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+            {
+              // My other piece is an obstacle to further moving in this direction
+              break;
+            }
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+            {
+              Move oppMove;
+              if (iamDeterm)
+              {
+                const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                if (outcome > bestOutcome)
+                {
+                  bestOutcome = outcome;
+                  *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                  if (bestOutcome >= 1)
+                  {
+                    return bestOutcome;
+                  }
+                }
+              }
+              else
+              {
+                const bool choose = nondet_bool();
+                *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                nondetHadMove = true;
+                if (choose)
+                {
+                  return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                }
+              }
+            }
+            // epilogue - restore the aim piece that was there
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+            if (aimPiece != NoPiece)
+            {
+              break;
+            }
+          }
+        }
         break;
       }
       case WhiteQueen:
       case BlackQueen:
       {
+        ChessGameState nextCgs = *cgs;
+        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+        // Remove this queen from the old position
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        for (int8_t iDir=0; iDir<8; iDir++)
+        {
+          for (int8_t dist=1; dist<=7; dist++)
+          {
+            const Position dstPos = MakePos(srcRow + dist * cQueenDirs[iDir][0], srcCol + dist * cQueenDirs[iDir][1], false);
+            const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
+            if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+            {
+              // My other piece is an obstacle to further moving in this direction
+              break;
+            }
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+            {
+              Move oppMove;
+              if (iamDeterm)
+              {
+                const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                if (outcome > bestOutcome)
+                {
+                  bestOutcome = outcome;
+                  *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                  if (bestOutcome >= 1)
+                  {
+                    return bestOutcome;
+                  }
+                }
+              }
+              else
+              {
+                const bool choose = nondet_bool();
+                *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                nondetHadMove = true;
+                if (choose)
+                {
+                  return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                }
+              }
+            }
+            // epilogue - restore the aim piece that was there
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+            if (aimPiece != NoPiece)
+            {
+              break;
+            }
+          }
+        }
         break;
       }
       default:
