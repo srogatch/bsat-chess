@@ -748,11 +748,106 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
       case WhiteKnight:
       case BlackKnight:
       {
+        ChessGameState nextCgs = *cgs;
+        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+        // Remove this knight from the old position
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        for (int8_t iDir=0; iDir<8; iDir++)
+        {
+          const Position dstPos = MakePos(srcRow + cKnightDirs[iDir][0], srcCol + cKnightDirs[iDir][1], false);
+          const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
+          if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+          {
+            // My another piece prevents from moving there
+            continue;
+          }
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+          if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+          {
+            Move oppMove;
+            if (iamDeterm)
+            {
+              const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+              if (outcome > bestOutcome)
+              {
+                bestOutcome = outcome;
+                *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                if (bestOutcome >= 1)
+                {
+                  return bestOutcome;
+                }
+              }
+            }
+            else
+            {
+              const bool choose = nondet_bool();
+              *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+              nondetHadMove = true;
+              if (choose)
+              {
+                return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+              }
+            }
+          }
+          // epilogue - restore the aim piece that was there
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+        }
         break;
       }
       case WhiteBishop:
       case BlackBishop:
       {
+        ChessGameState nextCgs = *cgs;
+        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+        // Remove this bishop from the old position
+        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece);
+        for (int8_t iDir=0; iDir<4; iDir++)
+        {
+          for (int8_t dist=1; dist<=7; dist++)
+          {
+            const Position dstPos = MakePos(srcRow + dist * cBishopDirs[iDir][0], srcCol + dist * cBishopDirs[iDir][1], false);
+            const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
+            if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+            {
+              // My other piece is an obstacle to further moving in this direction
+              break;
+            }
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece);
+            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+            {
+              Move oppMove;
+              if (iamDeterm)
+              {
+                const int8_t outcome = -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                if (outcome > bestOutcome)
+                {
+                  bestOutcome = outcome;
+                  *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                  if (bestOutcome >= 1)
+                  {
+                    return bestOutcome;
+                  }
+                }
+              }
+              else
+              {
+                const bool choose = nondet_bool();
+                *bestMove = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                nondetHadMove = true;
+                if (choose)
+                {
+                  return -Play(&nextCgs, !iamDeterm, MakePos(0, 0, false), &oppMove, depth + 1);
+                }
+              }
+            }
+            // epilogue - restore the aim piece that was there
+            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece);
+            if (aimPiece != NoPiece)
+            {
+              break;
+            }
+          }
+        }
         break;
       }
       case WhiteRook:
