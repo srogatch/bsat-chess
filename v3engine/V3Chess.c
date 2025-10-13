@@ -174,6 +174,8 @@ bool IsOnBoad(int8_t row, int8_t col)
 // Returns check state if a king is placed at the specified row and column, e.g. because it stands there in the game,
 // or because it transitions the cell during castling.
 CheckState IsAttacked(const ChessGameState *cgs, const uint8_t kingRow, const uint8_t kingCol, const bool whiteKing) {
+  int8_t nAttackers = 0;
+
   // Search for opponent's knight making the check
   for (int8_t i=0; i<8; i++)
   {
@@ -186,11 +188,11 @@ CheckState IsAttacked(const ChessGameState *cgs, const uint8_t kingRow, const ui
     const ChessPiece piece = GetPieceAt(cgs, oppKnightRow, oppKnightCol);
     if ( (whiteKing && piece == BlackKnight) || (!whiteKing && piece == WhiteKnight) )
     {
-      return MakeCheckState(true, true);
+      nAttackers++;
+      break;
     }
   }
 
-  int8_t nAttackers = 0;
   // Check attacks by opponent's pawns
   for (int8_t dc=-1; dc<=+1; dc+=2)
   {
