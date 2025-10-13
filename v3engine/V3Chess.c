@@ -733,7 +733,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
             // My other piece prevents this my pawn from moving there
             continue;
           }
-          if ( (dc == 0 && aimPiece == NoPiece) || (dc != 0 && IsWhitePiece(aimPiece) != iamWhite) ) {
+          if ( (dc == 0 && aimPiece == NoPiece) || (dc != 0 && aimPiece != NoPiece && IsWhitePiece(aimPiece) != iamWhite) ) {
             ChessGameState nextCgs = *cgs;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove my pawn from the old position
