@@ -199,13 +199,13 @@ CheckState IsAttacked(const ChessGameState *cgs, const uint8_t kingRow, const ui
   {
     for (int8_t k=1; k<=7; k++)
     {
-      const int8_t oppRookRow = kingRow + k * cBishopDirs[iDir][0];
-      const int8_t oppRookCol = kingCol + k * cBishopDirs[iDir][1];
-      if (!IsOnBoad(oppRookRow, oppRookCol))
+      const int8_t oppBishopRow = kingRow + k * cBishopDirs[iDir][0];
+      const int8_t oppBishopCol = kingCol + k * cBishopDirs[iDir][1];
+      if (!IsOnBoad(oppBishopRow, oppBishopCol))
       {
         break;
       }
-      const ChessPiece piece = GetPieceAt(cgs, oppRookRow, oppRookCol);
+      const ChessPiece piece = GetPieceAt(cgs, oppBishopRow, oppBishopCol);
       if ( (whiteKing && (piece == BlackBishop || piece == BlackQueen))
         || (!whiteKing && (piece == WhiteBishop || piece == WhiteQueen)) )
       {
@@ -217,6 +217,16 @@ CheckState IsAttacked(const ChessGameState *cgs, const uint8_t kingRow, const ui
         break;
       }
     }
+  }
+
+  // Check the vicinity of opponent's king
+  const int8_t oppKingRow = whiteKing ? cgs->blackKingRow_ : cgs->whiteKingRow_;
+  const int8_t oppKingCol = whiteKing ? cgs->blackKingCol_ : cgs->whiteKingCol_;
+  if (abs(kingRow - oppKingRow) <= 1 && abs(kingCol - oppKingCol) <= 1)
+  {
+    // My king can't move too close to the opponent's king, and can't take pieces protected by opponent's king.
+    // I can't either castle when the opponent king is attacking a mid-cell.
+    nAttackers++;
   }
 
   return MakeCheckState(nAttackers > 0, nAttackers >= 2);
@@ -260,14 +270,6 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
     if (piece != NoPiece && iamWhite == IsWhitePiece(piece))
     {
       // My king can't move here because there's another piece of the same color.
-      continue;
-    }
-    // Check the vicinity of opponent's king
-    const int8_t oppKingRow = iamWhite ? cgs->blackKingRow_ : cgs->whiteKingRow_;
-    const int8_t oppKingCol = iamWhite ? cgs->blackKingCol_ : cgs->whiteKingCol_;
-    if (abs(nextKingRow - oppKingRow) <= 1 && abs(nextKingCol - oppKingCol) <= 1)
-    {
-      // My king can't move too close to the opponent's king
       continue;
     }
     // Prepare to move, even if taking an opponent's piece, but verify that after that my king is not under a check
@@ -330,7 +332,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
   if (!kingCheck.isCheck_) {
     // Try the castlings
     if (iamWhite) {
-      if (cgs->canWhite00_) {
+      if (cgs->canWhite00_ && GetPieceAt(cgs, 0, 7) == WhiteRook) {
         bool clear = true;
         for (int8_t col=5; col<=6; ++col)
         {
@@ -388,7 +390,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
           }
         }
       }
-      if (cgs->canWhite000_)
+      if (cgs->canWhite000_ && GetPieceAt(cgs, 0, 0) == WhiteRook)
       {
         bool clear = true;
         for (int8_t col=1; col<=3; ++col)
@@ -448,7 +450,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         }
       }
     } else {
-      if (cgs->canBlack00_) {
+      if (cgs->canBlack00_ && GetPieceAt(cgs, 7, 7) == BlackRook) {
         bool clear = true;
         for (int8_t col=5; col<=6; ++col)
         {
@@ -506,7 +508,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
           }
         }
       }
-      if (cgs->canBlack000_) {
+      if (cgs->canBlack000_ && GetPieceAt(cgs, 7, 0) == BlackRook) {
         bool clear = true;
         for (int8_t col=1; col<=3; ++col)
         {
