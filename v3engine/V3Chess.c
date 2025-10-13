@@ -771,7 +771,7 @@ int8_t Play(const ChessGameState *cgs, bool iamDeterm, const Position enPasse, M
         for (int8_t iDir=0; iDir<8; iDir++)
         {
           const int8_t dstRow = srcRow + cKnightDirs[iDir][0];
-          const int8_t dstCol = srcCol + cKnightDirs[iDir][1]
+          const int8_t dstCol = srcCol + cKnightDirs[iDir][1];
           if (!IsOnBoad(dstRow, dstCol)) {
             continue;
           }
