@@ -1,27 +1,30 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `model/`: C sources for the core chess engine (`ChessModel.c`) and generated position snapshot (`Situation.h`). The `main` function is only for quick inspection of a position’s legal moves.
-- `tools/`: Python utilities, notably `write_situation.py`, which emits `model/Situation.h` from a python-chess board.
-- `tests/`: Pytest suite (`test_chessmodel.py`) that replays PGNs from the dataset and checks move categorization.
-- `datasets/`: Input data used by tests. `club_games_data.csv` is required; keep the ZIP archived alongside it for provenance.
-- `build/`: Compiled artifacts such as `libchessmodel.so`; safe to clean and regenerate.
+- `v3engine/`: Primary CBMC-friendly chess engine (`V3Chess.c`) plus board bootstrap (`V3Situation.h`). Everything needed for formal analysis lives here.
+- `tools/`: Python helpers such as `write_situation.py` for emitting C snapshots when you need fixtures outside the default start position.
+- `tests/`: Pytest suite; `test_chessmodel.py` remains the regression harness for replaying full games against the dataset.
+- `datasets/`: Holds the PGN-derived CSV inputs. Keep `club_games_data.csv` and its ZIP side-by-side for reproducibility.
+- `build/`: Destination for compiled artifacts (`build/v3engine`, shared libs, CBMC traces). Safe to wipe when rebuilding.
 
 ## Build, Test, and Development Commands
-- `python3 tools/write_situation.py --fen "<FEN>"`: Generate `Situation.h` for a specific position. Use `--pgn <file> --game-index N --ply M` to snapshot deeper in a game.
-- `gcc -std=c11 -O2 -shared -fPIC -o build/libchessmodel.so model/ChessModel.c`: Build the shared library used by tests.
-- `pytest tests/test_chessmodel.py::test_dataset_transitions -q`: Replays every move in the dataset (~4½ minutes); run before publishing changes.
+- `gcc -std=c11 -Wall -Wextra -DNDEBUG -o build/v3engine v3engine/V3Chess.c`: Fast sanity build of the CBMC target; keeps warnings visible.
+- `cbmc v3engine/V3Chess.c --function main --bounds-check --pointer-check --unwind 6`: Typical bounded run; tune `--unwind` per scenario and capture traces under `build/`.
+- `python3 tools/write_situation.py --fen "<FEN>" > v3engine/V3Situation.h`: Rebuild the starting position header from a FEN before specialised analyses.
+- `pytest tests/test_chessmodel.py::test_dataset_transitions -q`: Full dataset replay (~4½ minutes). Run after modifying move logic.
 
 ## Coding Style & Naming Conventions
-- C code is ANSI C11 with two-space indentation, braces on new lines, and explicit helper functions. Prefer `static` for internal linkage and keep enums synchronized with `python-chess` consumers.
-- Python utilities follow PEP 8; use descriptive function names (`load_board_from_pgn`) and type hints where practical.
-- Generated files should include a header comment stating their provenance.
+- C sources target C11; use two-space indentation, brace-on-new-line, and prefer `static` for file-local helpers. Keep loops explicitly bounded for CBMC (no open-ended `while` unless guarded with constants).
+- Name enums and structs by chess role (`WhiteKnight`, `ChessGameState`); avoid magic numbers in move generators—introduce `static const` tables instead.
+- Python utilities remain PEP 8 compliant with descriptive names and optional type hints when it clarifies expected structures.
+- Regenerated headers should include a provenance comment (`// Auto-generated from ...`) to prevent manual edits.
 
 ## Testing Guidelines
-- Primary framework: `pytest`. Keep new tests under `tests/` and name files `test_*.py`.
-- Always rebuild the shared library before running the suite if `ChessModel.c` changes.
-- Slow dataset test is the authoritative regression check; smaller unit tests are welcome for focused logic.
+- Treat CBMC as the first line of defense: run with `--unwind` values that cover the scenario you touched, and store counterexamples for future debugging.
+- Pytest remains the acceptance layer; keep new tests under `tests/` with `test_*.py` naming. Mark long-running trials with `@pytest.mark.slow`.
+- Rebuild `build/v3engine` (or the shared lib) before executing either CBMC or pytest to ensure bitfield changes are reflected.
+- For smoke checks, script minimal positions via `tools/write_situation.py` and run CBMC on the resulting header.
 
 ## Commit & Pull Request Guidelines
-- Write commits in imperative mood (“Add en-passant guard”), scoped to a single concern. Reference dataset or tooling changes explicitly.
-- PRs should summarize chess rule coverage, list verification commands, and link issues. Include notes on performance impacts (e.g., dataset replay duration) and any new tooling usage.
+- Use imperative, single-responsibility commits (“Clamp knight check handling”). Reference relevant CBMC traces or dataset fixtures when they motivate the change.
+- Pull requests should recap rules affected, list commands executed (`gcc`, `cbmc`, `pytest`), and call out unwind-depth or dataset runtime changes. Attach CBMC traces when documenting fixes.
