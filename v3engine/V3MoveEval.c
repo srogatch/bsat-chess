@@ -86,6 +86,10 @@ typedef struct
   uint32_t blackKingRow_ : 3;
   // Black king's column
   uint32_t blackKingCol_ : 3;
+  // Whether the last move was a double-forward pawn
+  uint32_t isEnpasse_ : 1;
+  // If en-passe, the column of the pawn that moved
+  uint32_t enPasseCol_ : 3;
 } ChessGameState;
 
 ChessPiece GetPieceAt(const ChessGameState *cgs, const uint8_t row, const uint8_t col) {
@@ -296,7 +300,7 @@ extern bool nondet_bool();
 
 // If the previous move of the opponent was 2-cell pawn move, enPasse stores active_==true and the new coords of that pawn.
 // Returns +1 if I win, 0 if the game ends in a draw or stalemate, or -1 if I lose.
-GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMoves, int *nMoves)
+GameEnds GetMoves(const ChessGameState *cgs, Move *outMoves, int *nMoves)
 {
   *nMoves = 0;
   // First of all check if we need to hide from a check or retreat
@@ -321,6 +325,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
     }
     // Prepare to move, even if taking an opponent's piece, but verify that after that my king is not under a check
     ChessGameState nextCgs = *cgs;
+    nextCgs.isEnpasse_ = 0;
+    nextCgs.enPasseCol_ = 0;
     // After moving the king, we lose the possibility of castlings
     if (iamWhite)
     {
@@ -354,9 +360,9 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
     if (nMoves == 0)
     {
       // The king must retreat and there are no moves => checkmate
-      return GameEnds::Checkmate;
+      return Checkmate;
     }
-    return GameEnds::NoGameEnd;
+    return NoGameEnd;
   }
   if (!kingCheck.isCheck_) {
     // Try the castlings
@@ -380,6 +386,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
         if (clear)
         {
           // ChessGameState nextCgs = *cgs;
+          // nextCgs.isEnpasse_ = 0;
+          // nextCgs.enPasseCol_ = 0;
           // nextCgs.blacksTurn_ = !cgs->blacksTurn_;
           // nextCgs.canWhite00_ = 0;
           // nextCgs.canWhite000_ = 0;
@@ -417,6 +425,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
         if (clear)
         {
           // ChessGameState nextCgs = *cgs;
+          // nextCgs.isEnpasse_ = 0;
+          // nextCgs.enPasseCol_ = 0;
           // nextCgs.blacksTurn_ = !cgs->blacksTurn_;
           // nextCgs.canWhite00_ = 0;
           // nextCgs.canWhite000_ = 0;
@@ -454,6 +464,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
         if (clear)
         {
           // ChessGameState nextCgs = *cgs;
+          // nextCgs.isEnpasse_ = 0;
+          // nextCgs.enPasseCol_ = 0;
           // nextCgs.blacksTurn_ = !cgs->blacksTurn_;
           // nextCgs.canBlack00_ = 0;
           // nextCgs.canBlack000_ = 0;
@@ -490,6 +502,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
         if (clear)
         {
           // ChessGameState nextCgs = *cgs;
+          // nextCgs.isEnpasse_ = 0;
+          // nextCgs.enPasseCol_ = 0;
           // nextCgs.blacksTurn_ = !cgs->blacksTurn_;
           // nextCgs.canBlack00_ = 0;
           // nextCgs.canBlack000_ = 0;
@@ -536,11 +550,16 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
             // The pawn can move 2 cells front, with en-passe option for the opponent
             const Position dstPos = MakePos(iamWhite ? 3 : 4, srcCol, true);
             ChessGameState nextCgs = *cgs;
+            nextCgs.isEnpasse_ = 0;
+            nextCgs.enPasseCol_ = 0;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove the pawn from the previous position
             SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
             // Put the pawn to the new position
             SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
+            // Fill out the enpasse structures
+            nextCgs.isEnpasse_ = 1;
+            nextCgs.enPasseCol_ = srcCol;
             if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
             {
               outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
@@ -549,18 +568,21 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
           }
         }
         // Don't forget abot the en-passe taking of the opponent's pawn
-        if (enPasse.active_)
+        if (cgs->isEnpasse_)
         {
-          const bool takeLeft = (enPasse.col_ == srcCol-1 && enPasse.row_ == srcRow);
-          const bool takeRight = (enPasse.col_ == srcCol+1 && enPasse.row_ == srcRow);
+          const int8_t enPasseRow = (iamWhite ? 4 : 3);
+          const bool takeLeft = (cgs->enPasseCol_ == srcCol-1 && srcRow == enPasseRow);
+          const bool takeRight = (cgs->enPasseCol_ == srcCol+1 && srcRow == enPasseRow);
           if (takeLeft || takeRight)
           {
             ChessGameState nextCgs = *cgs;
+            nextCgs.isEnpasse_ = 0;
+            nextCgs.enPasseCol_ = 0;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove my pawn from the previous position
             SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
             // Remove opponents pawn that we take en-passe
-            SetPieceAt(&nextCgs, enPasse.row_, enPasse.col_, NoPiece, false);
+            SetPieceAt(&nextCgs, enPasseRow, cgs->enPasseCol_, NoPiece, false);
             // Put my pawn to the new position
             Position dstPos = MakePos(iamWhite ? 5 : 2, srcCol + (takeLeft ? -1 : +1), false);
             SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
@@ -588,6 +610,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
           }
           if ( (dc == 0 && aimPiece == NoPiece) || (dc != 0 && aimPiece != NoPiece && IsWhitePiece(aimPiece) != iamWhite) ) {
             ChessGameState nextCgs = *cgs;
+            nextCgs.isEnpasse_ = 0;
+            nextCgs.enPasseCol_ = 0;
             nextCgs.blacksTurn_ = !cgs->blacksTurn_;
             // Remove my pawn from the old position
             SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
@@ -621,6 +645,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
       case BlackKnight:
       {
         ChessGameState nextCgs = *cgs;
+        nextCgs.isEnpasse_ = 0;
+        nextCgs.enPasseCol_ = 0;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this knight from the old position
         SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
@@ -655,6 +681,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
       case BlackBishop:
       {
         ChessGameState nextCgs = *cgs;
+        nextCgs.isEnpasse_ = 0;
+        nextCgs.enPasseCol_ = 0;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this bishop from the old position
         SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
@@ -696,6 +724,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
       case BlackRook:
       {
         ChessGameState nextCgs = *cgs;
+        nextCgs.isEnpasse_ = 0;
+        nextCgs.enPasseCol_ = 0;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this rook from the old position, forbid castling with this rook.
         SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, true);
@@ -737,6 +767,8 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
       case BlackQueen:
       {
         ChessGameState nextCgs = *cgs;
+        nextCgs.isEnpasse_ = 0;
+        nextCgs.enPasseCol_ = 0;
         nextCgs.blacksTurn_ = !cgs->blacksTurn_;
         // Remove this queen from the old position
         SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
@@ -784,18 +816,23 @@ GameEnds GetMoves(const ChessGameState *cgs, const Position enPasse, Move *outMo
     if (kingCheck.isCheck_)
     {
       // A check and no moves => mate (I lost)
-      return GameEnds::Checkmate;
+      return Checkmate;
     }
     else
     {
       // No check and no moves => stalemate
-      return GameEnds::Stalemate;
+      return Stalemate;
     }
   }
   else
   {
-    return GameEnds::NoGameEnd;
+    return NoGameEnd;
   }
+}
+
+void ApplyMove(ChessGameState *cgs, const Move move)
+{
+
 }
 
 #include "V3Situation.h"

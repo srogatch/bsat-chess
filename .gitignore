@@ -6,3 +6,4 @@ __pycache__/
 /old/model/*.o
 /old/build/
 /old/ChessModel
+/V3MoveEval
