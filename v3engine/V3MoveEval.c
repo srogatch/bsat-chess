@@ -357,7 +357,7 @@ GameEnds GetMoves(const ChessGameState *cgs, Move *outMoves, int *nMoves)
   }
   if (kingCheck.mustRetreat_)
   {
-    if (nMoves == 0)
+    if (*nMoves == 0)
     {
       // The king must retreat and there are no moves => checkmate
       return Checkmate;
@@ -811,7 +811,7 @@ GameEnds GetMoves(const ChessGameState *cgs, Move *outMoves, int *nMoves)
       }
     }
   }
-  if (nMoves == 0)
+  if (*nMoves == 0)
   {
     if (kingCheck.isCheck_)
     {
