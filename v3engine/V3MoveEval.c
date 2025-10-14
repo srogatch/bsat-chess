@@ -832,7 +832,96 @@ GameEnds GetMoves(const ChessGameState *cgs, Move *outMoves, int *nMoves)
 
 void ApplyMove(ChessGameState *cgs, const Move move)
 {
-
+  const ChessPiece srcPiece = GetPieceAt(cgs, move.srcRow_, move.srcCol_);
+  const bool iamWhite = !cgs->blacksTurn_;
+  // TODO: remove asserts to simplify CBMC after the program is debugged
+  assert(srcPiece != NoPiece);
+  assert(IsWhitePiece(srcPiece) == iamWhite);
+  SetPieceAt(cgs, move.srcRow_, move.srcCol_, NoPiece, true);
+  cgs->blacksTurn_ = !cgs->blacksTurn_;
+  // En-passe capture
+  if (cgs->isEnpasse_ && (srcPiece == WhitePawn || srcPiece == BlackPawn) && abs(move.dstCol_ - move.srcCol_) == 1
+    && move.dstCol_ == cgs->enPasseCol_)
+  {
+    const ChessPiece dstPiece = GetPieceAt(cgs, move.dstRow_, move.dstCol_);
+    if (dstPiece == NoPiece)
+    {
+      // TODO: assert there was an opponent's pawn
+      SetPieceAt(cgs, move.srcRow_, move.dstCol_, NoPiece, false);
+      SetPieceAt(cgs, move.dstRow_, move.dstCol_, srcPiece, false);
+      cgs->isEnpasse_ = 0;
+      cgs->enPasseCol_ = 0;
+      return;
+    }
+  }
+  // Double-forward pawn move
+  if ( (srcPiece == WhitePawn || srcPiece == BlackPawn) && abs(move.srcRow_ - move.dstRow_) == 2 )
+  {
+    SetPieceAt(cgs, move.dstRow_, move.dstCol_, srcPiece, false);
+    cgs->isEnpasse_ = 1;
+    cgs->enPasseCol_ = move.srcCol_;
+    return;
+  }
+  cgs->isEnpasse_ = 0;
+  cgs->enPasseCol_ = 0;
+  // Promotions
+  if ( (srcPiece == WhitePawn && move.dstRow_ == 7) || (srcPiece == BlackPawn && move.dstRow_ == 0) )
+  {
+    switch (move.iPromo_)
+    {
+    case 0:
+      SetPieceAt(cgs, move.dstRow_, move.dstCol_, iamWhite ? WhiteKnight : BlackKnight, true);
+      break;
+    case 1:
+      SetPieceAt(cgs, move.dstRow_, move.dstCol_, iamWhite ? WhiteBishop : BlackBishop, true);
+      break;
+    case 2:
+      SetPieceAt(cgs, move.dstRow_, move.dstCol_, iamWhite ? WhiteRook : BlackRook, true);
+      break;
+    case 3:
+      SetPieceAt(cgs, move.dstRow_, move.dstCol_, iamWhite ? WhiteQueen : BlackQueen, true);
+      break;
+    }
+    return;
+  }
+  // King moves (update cgs cache and lose all castlings), including castlings
+  if (srcPiece == WhiteKing || srcPiece == BlackKing)
+  {
+    // Castling
+    if (abs(move.srcCol_ - move.dstCol_) == 2)
+    {
+      if (move.dstCol_ < move.srcCol_)
+      {
+        // Long castling 0-0-0
+        SetPieceAt(cgs, move.srcRow_, 0, NoPiece, false);
+        SetPieceAt(cgs, move.srcRow_, move.srcCol_-1, iamWhite ? WhiteRook : BlackRook, false);
+      }
+      else
+      {
+        // Short castling 0-0
+        SetPieceAt(cgs, move.srcRow_, 7, NoPiece, false);
+        SetPieceAt(cgs, move.srcRow_, move.srcCol_+1, iamWhite ? WhiteRook : BlackRook, false);
+      }
+    }
+    SetPieceAt(cgs, move.dstRow_, move.dstCol_, srcPiece, false);
+    if (iamWhite)
+    {
+      cgs->whiteKingRow_ = move.dstRow_;
+      cgs->whiteKingCol_ = move.dstCol_;
+    }
+    else
+    {
+      cgs->blackKingRow_ = move.dstRow_;
+      cgs->blackKingCol_ = move.dstCol_;
+    }
+    cgs->canWhite00_ = 0;
+    cgs->canWhite000_ = 0;
+    cgs->canBlack00_ = 0;
+    cgs->canBlack000_ = 0;
+    return;
+  }
+  // Else, simply put the piece to the destination cell
+  SetPieceAt(cgs, move.dstRow_, move.dstCol_, srcPiece, false);
 }
 
 #include "V3Situation.h"
