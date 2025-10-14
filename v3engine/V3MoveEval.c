@@ -3,8 +3,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#define MAX_SEARCH_DEPTH 64
-#define MAX_MOVES 256
+#define MAX_SEARCH_DEPTH 4
+#define MAX_MOVE_FRONT 256
 
 typedef struct
 {
@@ -526,144 +526,197 @@ GameEnds GetMoves(const ChessGameState *cgs, Move *outMoves, int *nMoves)
   // If my king is at a check, try to hide behind some piece of mine, or take the offending opponent's piece
   // Try to move my figures, verifying that after that move my king is not at a check
   // If a rook moves or is taken, wipe off the possibility of castling with that rook
+  Position myPieces[16];
+  int8_t nPieces = 0;
   for (int8_t srcRow=0; srcRow<8; ++srcRow)
   {
     for (int8_t srcCol=0; srcCol<8; ++srcCol)
     {
       const ChessPiece piece = GetPieceAt(cgs, srcRow, srcCol);
-      if (piece == NoPiece || IsWhitePiece(piece) != iamWhite)
+      if (piece == NoPiece || piece == WhiteKing || piece == BlackKing || IsWhitePiece(piece) != iamWhite)
       {
-        // No piece or not my piece in this cell
+        // No piece or not my piece in this cell, or a king which we've handled above
         continue;
       }
-      switch (piece)
+      myPieces[nPieces].row_ = srcRow;
+      myPieces[nPieces].col_ = srcCol;
+      nPieces++;
+    }
+  }
+  for (int8_t iPiece=0; iPiece<16; iPiece++) {
+    if (iPiece >= nPieces)
+    {
+      break;
+    }
+    const int8_t srcRow = myPieces[iPiece].row_;
+    const int8_t srcCol = myPieces[iPiece].col_;
+    const ChessPiece piece = GetPieceAt(cgs, srcRow, srcCol);
+    switch (piece)
+    {
+    case WhitePawn:
+    case BlackPawn:
+    {
+      if (iamWhite && srcRow == 1 || !iamWhite && srcRow == 6)
       {
-      case WhitePawn:
-      case BlackPawn:
-      {
-        if (iamWhite && srcRow == 1 || !iamWhite && srcRow == 6)
+        const ChessPiece midPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 1 : -1), srcCol);
+        const ChessPiece finPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 2 : -2), srcCol);
+        if (midPiece == NoPiece && finPiece == NoPiece)
         {
-          const ChessPiece midPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 1 : -1), srcCol);
-          const ChessPiece finPiece = GetPieceAt(cgs, srcRow + (iamWhite ? 2 : -2), srcCol);
-          if (midPiece == NoPiece && finPiece == NoPiece)
+          // The pawn can move 2 cells front, with en-passe option for the opponent
+          const Position dstPos = MakePos(iamWhite ? 3 : 4, srcCol, true);
+          ChessGameState nextCgs = *cgs;
+          nextCgs.isEnpasse_ = 0;
+          nextCgs.enPasseCol_ = 0;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          // Remove the pawn from the previous position
+          SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+          // Put the pawn to the new position
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
+          // Fill out the enpasse structures
+          nextCgs.isEnpasse_ = 1;
+          nextCgs.enPasseCol_ = srcCol;
+          if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
           {
-            // The pawn can move 2 cells front, with en-passe option for the opponent
-            const Position dstPos = MakePos(iamWhite ? 3 : 4, srcCol, true);
-            ChessGameState nextCgs = *cgs;
-            nextCgs.isEnpasse_ = 0;
-            nextCgs.enPasseCol_ = 0;
-            nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-            // Remove the pawn from the previous position
-            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
-            // Put the pawn to the new position
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
-            // Fill out the enpasse structures
-            nextCgs.isEnpasse_ = 1;
-            nextCgs.enPasseCol_ = srcCol;
-            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
-            {
-              outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
-              (*nMoves)++;
-            }
+            outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+            (*nMoves)++;
           }
         }
-        // Don't forget abot the en-passe taking of the opponent's pawn
-        if (cgs->isEnpasse_)
+      }
+      // Don't forget abot the en-passe taking of the opponent's pawn
+      if (cgs->isEnpasse_)
+      {
+        const int8_t enPasseRow = (iamWhite ? 4 : 3);
+        const bool takeLeft = (cgs->enPasseCol_ == srcCol-1 && srcRow == enPasseRow);
+        const bool takeRight = (cgs->enPasseCol_ == srcCol+1 && srcRow == enPasseRow);
+        if (takeLeft || takeRight)
         {
-          const int8_t enPasseRow = (iamWhite ? 4 : 3);
-          const bool takeLeft = (cgs->enPasseCol_ == srcCol-1 && srcRow == enPasseRow);
-          const bool takeRight = (cgs->enPasseCol_ == srcCol+1 && srcRow == enPasseRow);
-          if (takeLeft || takeRight)
+          ChessGameState nextCgs = *cgs;
+          nextCgs.isEnpasse_ = 0;
+          nextCgs.enPasseCol_ = 0;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          // Remove my pawn from the previous position
+          SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+          // Remove opponents pawn that we take en-passe
+          SetPieceAt(&nextCgs, enPasseRow, cgs->enPasseCol_, NoPiece, false);
+          // Put my pawn to the new position
+          Position dstPos = MakePos(iamWhite ? 5 : 2, srcCol + (takeLeft ? -1 : +1), false);
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
+          Move oppMove;
+          if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
           {
-            ChessGameState nextCgs = *cgs;
-            nextCgs.isEnpasse_ = 0;
-            nextCgs.enPasseCol_ = 0;
-            nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-            // Remove my pawn from the previous position
-            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
-            // Remove opponents pawn that we take en-passe
-            SetPieceAt(&nextCgs, enPasseRow, cgs->enPasseCol_, NoPiece, false);
-            // Put my pawn to the new position
-            Position dstPos = MakePos(iamWhite ? 5 : 2, srcCol + (takeLeft ? -1 : +1), false);
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, false);
-            Move oppMove;
-            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
-            {
-              outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
-              (*nMoves)++;
-            }
+            outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+            (*nMoves)++;
           }
         }
-        // Normal pawn moves front, and takes left and right; with promotions!
-        for (int8_t dc=-1; dc<=1; dc++) {
-          const int8_t dstRow = iamWhite ? srcRow+1 : srcRow-1;
-          const int8_t dstCol = srcCol + dc;
-          if (!IsOnBoad(dstRow, dstCol)) {
-            continue;
-          }
-          const Position dstPos = MakePos(dstRow, dstCol, false);
-          const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
-          if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+      }
+      // Normal pawn moves front, and takes left and right; with promotions!
+      for (int8_t dc=-1; dc<=1; dc++) {
+        const int8_t dstRow = iamWhite ? srcRow+1 : srcRow-1;
+        const int8_t dstCol = srcCol + dc;
+        if (!IsOnBoad(dstRow, dstCol)) {
+          continue;
+        }
+        const Position dstPos = MakePos(dstRow, dstCol, false);
+        const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
+        if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
+        {
+          // My other piece prevents this my pawn from moving there
+          continue;
+        }
+        if ( (dc == 0 && aimPiece == NoPiece) || (dc != 0 && aimPiece != NoPiece && IsWhitePiece(aimPiece) != iamWhite) ) {
+          ChessGameState nextCgs = *cgs;
+          nextCgs.isEnpasse_ = 0;
+          nextCgs.enPasseCol_ = 0;
+          nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+          // Remove my pawn from the old position
+          SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+          // Put my pawn to the new position
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, dc != 0);
+          // Promoted piece selection doesn't influence when it serves as an obstacle to a check to me
+          if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
           {
-            // My other piece prevents this my pawn from moving there
-            continue;
-          }
-          if ( (dc == 0 && aimPiece == NoPiece) || (dc != 0 && aimPiece != NoPiece && IsWhitePiece(aimPiece) != iamWhite) ) {
-            ChessGameState nextCgs = *cgs;
-            nextCgs.isEnpasse_ = 0;
-            nextCgs.enPasseCol_ = 0;
-            nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-            // Remove my pawn from the old position
-            SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
-            // Put my pawn to the new position
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, dc != 0);
-            // Promoted piece selection doesn't influence when it serves as an obstacle to a check to me
-            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
-            {
-              if (dstPos.row_ == 0 || dstPos.row_ == 7) {
-                // Try all kinds of promotions
-                const int8_t *pPromos = (iamWhite ? cWhitePromos : cBlackPromos);
-                for (int8_t iPromo=0; iPromo<4; iPromo++)
-                {
-                  const ChessPiece promotion = pPromos[iPromo];
-                  SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, promotion, true);
-                  outMoves[*nMoves] = MakeMovePromo(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
-                  (*nMoves)++;
-                }
-              }
-              else
+            if (dstPos.row_ == 0 || dstPos.row_ == 7) {
+              // Try all kinds of promotions
+              const int8_t *pPromos = (iamWhite ? cWhitePromos : cBlackPromos);
+              for (int8_t iPromo=0; iPromo<4; iPromo++)
               {
-                outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+                const ChessPiece promotion = pPromos[iPromo];
+                SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, promotion, true);
+                outMoves[*nMoves] = MakeMovePromo(srcRow, srcCol, dstPos.row_, dstPos.col_, iPromo);
                 (*nMoves)++;
               }
             }
+            else
+            {
+              outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+              (*nMoves)++;
+            }
           }
         }
-        break;
       }
-      case WhiteKnight:
-      case BlackKnight:
+      break;
+    }
+    case WhiteKnight:
+    case BlackKnight:
+    {
+      ChessGameState nextCgs = *cgs;
+      nextCgs.isEnpasse_ = 0;
+      nextCgs.enPasseCol_ = 0;
+      nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+      // Remove this knight from the old position
+      SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+      const uint8_t canCastle = SaveCastlings(&nextCgs);
+      for (int8_t iDir=0; iDir<8; iDir++)
       {
-        ChessGameState nextCgs = *cgs;
-        nextCgs.isEnpasse_ = 0;
-        nextCgs.enPasseCol_ = 0;
-        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-        // Remove this knight from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
-        const uint8_t canCastle = SaveCastlings(&nextCgs);
-        for (int8_t iDir=0; iDir<8; iDir++)
+        const int8_t dstRow = srcRow + cKnightDirs[iDir][0];
+        const int8_t dstCol = srcCol + cKnightDirs[iDir][1];
+        if (!IsOnBoad(dstRow, dstCol)) {
+          continue;
+        }
+        const Position dstPos = MakePos(dstRow, dstCol, false);
+        const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
+        if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
         {
-          const int8_t dstRow = srcRow + cKnightDirs[iDir][0];
-          const int8_t dstCol = srcCol + cKnightDirs[iDir][1];
+          // My another piece prevents from moving there
+          continue;
+        }
+        SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
+        if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+        {
+          outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+          (*nMoves)++;
+        }
+        // epilogue - restore the aim piece that was there
+        SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+        RestoreCastlings(&nextCgs, canCastle);
+      }
+      break;
+    }
+    case WhiteBishop:
+    case BlackBishop:
+    {
+      ChessGameState nextCgs = *cgs;
+      nextCgs.isEnpasse_ = 0;
+      nextCgs.enPasseCol_ = 0;
+      nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+      // Remove this bishop from the old position
+      SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+      const uint8_t canCastle = SaveCastlings(&nextCgs);
+      for (int8_t iDir=0; iDir<4; iDir++)
+      {
+        for (int8_t dist=1; dist<=7; dist++)
+        {
+          const int8_t dstRow = srcRow + dist * cBishopDirs[iDir][0];
+          const int8_t dstCol = srcCol + dist * cBishopDirs[iDir][1];
           if (!IsOnBoad(dstRow, dstCol)) {
-            continue;
+            break;
           }
           const Position dstPos = MakePos(dstRow, dstCol, false);
-          const ChessPiece aimPiece = GetPieceAt(cgs, dstPos.row_, dstPos.col_);
+          const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
           if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
           {
-            // My another piece prevents from moving there
-            continue;
+            // My other piece is an obstacle to further moving in this direction
+            break;
           }
           SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
           if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
@@ -674,141 +727,102 @@ GameEnds GetMoves(const ChessGameState *cgs, Move *outMoves, int *nMoves)
           // epilogue - restore the aim piece that was there
           SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
           RestoreCastlings(&nextCgs, canCastle);
-        }
-        break;
-      }
-      case WhiteBishop:
-      case BlackBishop:
-      {
-        ChessGameState nextCgs = *cgs;
-        nextCgs.isEnpasse_ = 0;
-        nextCgs.enPasseCol_ = 0;
-        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-        // Remove this bishop from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
-        const uint8_t canCastle = SaveCastlings(&nextCgs);
-        for (int8_t iDir=0; iDir<4; iDir++)
-        {
-          for (int8_t dist=1; dist<=7; dist++)
+          if (aimPiece != NoPiece)
           {
-            const int8_t dstRow = srcRow + dist * cBishopDirs[iDir][0];
-            const int8_t dstCol = srcCol + dist * cBishopDirs[iDir][1];
-            if (!IsOnBoad(dstRow, dstCol)) {
-              break;
-            }
-            const Position dstPos = MakePos(dstRow, dstCol, false);
-            const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
-            if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
-            {
-              // My other piece is an obstacle to further moving in this direction
-              break;
-            }
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
-            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
-            {
-              outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
-              (*nMoves)++;
-            }
-            // epilogue - restore the aim piece that was there
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
-            RestoreCastlings(&nextCgs, canCastle);
-            if (aimPiece != NoPiece)
-            {
-              break;
-            }
+            break;
           }
         }
-        break;
       }
-      case WhiteRook:
-      case BlackRook:
+      break;
+    }
+    case WhiteRook:
+    case BlackRook:
+    {
+      ChessGameState nextCgs = *cgs;
+      nextCgs.isEnpasse_ = 0;
+      nextCgs.enPasseCol_ = 0;
+      nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+      // Remove this rook from the old position, forbid castling with this rook.
+      SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, true);
+      uint8_t canCastle = SaveCastlings(&nextCgs);
+      for (int8_t iDir=0; iDir<4; iDir++)
       {
-        ChessGameState nextCgs = *cgs;
-        nextCgs.isEnpasse_ = 0;
-        nextCgs.enPasseCol_ = 0;
-        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-        // Remove this rook from the old position, forbid castling with this rook.
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, true);
-        uint8_t canCastle = SaveCastlings(&nextCgs);
-        for (int8_t iDir=0; iDir<4; iDir++)
+        for (int8_t dist=1; dist<=7; dist++)
         {
-          for (int8_t dist=1; dist<=7; dist++)
+          const int8_t dstRow = srcRow + dist * cRookDirs[iDir][0];
+          const int8_t dstCol = srcCol + dist * cRookDirs[iDir][1];
+          if (!IsOnBoad(dstRow, dstCol)) {
+            break;
+          }
+          const Position dstPos = MakePos(dstRow, dstCol, false);
+          const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
+          if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
           {
-            const int8_t dstRow = srcRow + dist * cRookDirs[iDir][0];
-            const int8_t dstCol = srcCol + dist * cRookDirs[iDir][1];
-            if (!IsOnBoad(dstRow, dstCol)) {
-              break;
-            }
-            const Position dstPos = MakePos(dstRow, dstCol, false);
-            const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
-            if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
-            {
-              // My other piece is an obstacle to further moving in this direction
-              break;
-            }
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
-            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
-            {
-              outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
-              (*nMoves)++;
-            }
-            // epilogue - restore the aim piece that was there
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
-            RestoreCastlings(&nextCgs, canCastle);
-            if (aimPiece != NoPiece)
-            {
-              break;
-            }
+            // My other piece is an obstacle to further moving in this direction
+            break;
+          }
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
+          if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+          {
+            outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+            (*nMoves)++;
+          }
+          // epilogue - restore the aim piece that was there
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+          RestoreCastlings(&nextCgs, canCastle);
+          if (aimPiece != NoPiece)
+          {
+            break;
           }
         }
-        break;
       }
-      case WhiteQueen:
-      case BlackQueen:
+      break;
+    }
+    case WhiteQueen:
+    case BlackQueen:
+    {
+      ChessGameState nextCgs = *cgs;
+      nextCgs.isEnpasse_ = 0;
+      nextCgs.enPasseCol_ = 0;
+      nextCgs.blacksTurn_ = !cgs->blacksTurn_;
+      // Remove this queen from the old position
+      SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
+      const uint8_t canCastle = SaveCastlings(&nextCgs);
+      for (int8_t iDir=0; iDir<8; iDir++)
       {
-        ChessGameState nextCgs = *cgs;
-        nextCgs.isEnpasse_ = 0;
-        nextCgs.enPasseCol_ = 0;
-        nextCgs.blacksTurn_ = !cgs->blacksTurn_;
-        // Remove this queen from the old position
-        SetPieceAt(&nextCgs, srcRow, srcCol, NoPiece, false);
-        const uint8_t canCastle = SaveCastlings(&nextCgs);
-        for (int8_t iDir=0; iDir<8; iDir++)
+        for (int8_t dist=1; dist<=7; dist++)
         {
-          for (int8_t dist=1; dist<=7; dist++)
+          const int8_t dstRow = srcRow + dist * cQueenDirs[iDir][0];
+          const int8_t dstCol = srcCol + dist * cQueenDirs[iDir][1];
+          if (!IsOnBoad(dstRow, dstCol)) {
+            break;
+          }
+          const Position dstPos = MakePos(dstRow, dstCol, false);
+          const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
+          if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
           {
-            const int8_t dstRow = srcRow + dist * cQueenDirs[iDir][0];
-            const int8_t dstCol = srcCol + dist * cQueenDirs[iDir][1];
-            if (!IsOnBoad(dstRow, dstCol)) {
-              break;
-            }
-            const Position dstPos = MakePos(dstRow, dstCol, false);
-            const ChessPiece aimPiece = GetPieceAt(&nextCgs, dstPos.row_, dstPos.col_);
-            if (aimPiece != NoPiece && IsWhitePiece(aimPiece) == iamWhite)
-            {
-              // My other piece is an obstacle to further moving in this direction
-              break;
-            }
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
-            if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
-            {
-              outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
-              (*nMoves)++;
-            }
-            // epilogue - restore the aim piece that was there
-            SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
-            RestoreCastlings(&nextCgs, canCastle);
-            if (aimPiece != NoPiece)
-            {
-              break;
-            }
+            // My other piece is an obstacle to further moving in this direction
+            break;
+          }
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, piece, true);
+          if (!GetCheckState(&nextCgs, iamWhite).isCheck_)
+          {
+            outMoves[*nMoves] = MakeMove(srcRow, srcCol, dstPos.row_, dstPos.col_);
+            (*nMoves)++;
+          }
+          // epilogue - restore the aim piece that was there
+          SetPieceAt(&nextCgs, dstPos.row_, dstPos.col_, aimPiece, false);
+          RestoreCastlings(&nextCgs, canCastle);
+          if (aimPiece != NoPiece)
+          {
+            break;
           }
         }
-        break;
       }
-      default:
-        assert(piece == WhiteKing || piece == BlackKing);
-      }
+      break;
+    }
+    default:
+      assert(false);
     }
   }
   if (*nMoves == 0)
@@ -926,13 +940,36 @@ void ApplyMove(ChessGameState *cgs, const Move move)
 
 #include "V3Situation.h"
 
+extern uint8_t nondet_int();
+
 int main() {
   ChessGameState cgs;
   InitSituation(&cgs);
 
-  // TODO: adjust array field sensitivity in CBMC to a value more than MAX_MOVES
-  Move moveOpts[MAX_MOVES];
-  Valuation vals[MAX_MOVES];
+  // TODO: adjust array field sensitivity in CBMC to a value more than MAX_MOVE_FRONT
+  Move moveOpts[MAX_MOVE_FRONT];
+  const int movesToWin = (nondet_int() % MAX_SEARCH_DEPTH) * 2 + 1;
 
+  // TODO: set CBMC unwind to at least 2*MAX_SEARCH_DEPTH+1
+  for (int i=0; i<=2*MAX_SEARCH_DEPTH; i++)
+  {
+    if (i > movesToWin)
+    {
+      break;
+    }
+    int nMoves;
+    const GameEnds ge = GetMoves(&cgs, moveOpts, &nMoves);
+    if (nMoves == 0)
+    {
+      if (i != movesToWin)
+      {
+        // Not a solution
+        break;
+      }
+      __CPROVER_assert(ge != Checkmate, "Opponent got a checkmate");
+    }
+    const int selMove = nondet_int() %  nMoves;
+    ApplyMove(&cgs, moveOpts[selMove]);
+  }
   return 0;
 }
