@@ -908,20 +908,20 @@ void ApplyMove(ChessGameState *cgs, const Move move)
     {
       cgs->whiteKingRow_ = move.dstRow_;
       cgs->whiteKingCol_ = move.dstCol_;
+      cgs->canWhite00_ = 0;
+      cgs->canWhite000_ = 0;
     }
     else
     {
       cgs->blackKingRow_ = move.dstRow_;
       cgs->blackKingCol_ = move.dstCol_;
+      cgs->canBlack00_ = 0;
+      cgs->canBlack000_ = 0;
     }
-    cgs->canWhite00_ = 0;
-    cgs->canWhite000_ = 0;
-    cgs->canBlack00_ = 0;
-    cgs->canBlack000_ = 0;
     return;
   }
   // Else, simply put the piece to the destination cell
-  SetPieceAt(cgs, move.dstRow_, move.dstCol_, srcPiece, false);
+  SetPieceAt(cgs, move.dstRow_, move.dstCol_, srcPiece, true);
 }
 
 #include "V3Situation.h"
