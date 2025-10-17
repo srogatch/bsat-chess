@@ -7,3 +7,5 @@ __pycache__/
 /old/build/
 /old/ChessModel
 /V3MoveEval
+/v3engine/output/
+/v3engine/*.i

@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "svcomp_shim.h"
+
 #define MAX_SEARCH_DEPTH 64
 
 typedef struct

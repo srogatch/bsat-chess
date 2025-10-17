@@ -42,6 +42,6 @@ void InitSituation(ChessGameState *cgs)
   SetPieceAt(cgs, 7, 6, BlackKnight, false);
   SetPieceAt(cgs, 7, 7, BlackRook, false);
 
-  cgs->isEnpasse_ = 0;
-  cgs->enPasseCol_ = 0;
+  // cgs->isEnpasse_ = 0;
+  // cgs->enPasseCol_ = 0;
 }
